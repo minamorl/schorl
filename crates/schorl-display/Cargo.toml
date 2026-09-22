@@ -1,0 +1,13 @@
+[package]
+name = "schorl-display"
+description = "板が映す Linux 側の出力を、実行時だけ借りて終了時に返す"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+schorl-core.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,44 @@
+# schorl workspace — Linux 向け VR 作業環境 schorl の第一版の骨格。
+#
+# 由来: pins/domains/schorl.spec@0.1 (import house_style@4.0 -> prohibitions@1.0)。
+# この manifest が満たす pin:
+#   release.no_publication  — workspace.package.publish = false (crates.io へは出さない)
+#   release.local_git_only  — remote を足さない。ここには何も書けないので運用側の掟。
+#   host.platform           — linux 前提 (crate schorl-scope が型で持つ)
+#
+# free schorl.implementation.language / free schorl.build_system を Rust + cargo で
+# 埋めている。spec が自由と明示した軸なので、選択そのものは pin 違反ではない。
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/schorl-core",
+    "crates/schorl-scope",
+    "crates/schorl-panel",
+    "crates/schorl-display",
+    "crates/schorl-capture",
+    "crates/schorl-input",
+    "crates/schorl-xr",
+    "crates/schorl-verify",
+    "crates/schorl",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
+[workspace.lints.rust]
+missing_docs = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.dependencies]
+schorl-core = { path = "crates/schorl-core" }
+schorl-scope = { path = "crates/schorl-scope" }
+schorl-panel = { path = "crates/schorl-panel" }
+schorl-display = { path = "crates/schorl-display" }
+schorl-capture = { path = "crates/schorl-capture" }
+schorl-input = { path = "crates/schorl-input" }
+schorl-xr = { path = "crates/schorl-xr" }
+schorl-verify = { path = "crates/schorl-verify" }

@@ -1,0 +1,20 @@
+[package]
+name = "schorl"
+description = "Linux 向けの自作 VR 作業環境 schorl — capability を束ねる境界"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+schorl-core.workspace = true
+schorl-scope.workspace = true
+schorl-panel.workspace = true
+schorl-display.workspace = true
+schorl-capture.workspace = true
+schorl-input.workspace = true
+schorl-xr.workspace = true
+schorl-verify.workspace = true
+
+[lints]
+workspace = true

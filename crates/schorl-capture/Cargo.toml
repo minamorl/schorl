@@ -1,0 +1,14 @@
+[package]
+name = "schorl-capture"
+description = "Linux 側の出力から実フレームを取る capability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+schorl-core.workspace = true
+schorl-display.workspace = true
+
+[lints]
+workspace = true

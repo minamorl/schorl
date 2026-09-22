@@ -1,0 +1,12 @@
+[package]
+name = "schorl-core"
+description = "schorl の横断基盤: エラー封筒・JSON ログ・UTC 時刻・ID・リトライ・秘密"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

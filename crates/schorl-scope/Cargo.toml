@@ -1,0 +1,13 @@
+[package]
+name = "schorl-scope"
+description = "schorl v1 の到達点と範囲外を型で固定する"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+schorl-core.workspace = true
+
+[lints]
+workspace = true
