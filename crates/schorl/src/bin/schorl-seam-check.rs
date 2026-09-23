@@ -14,6 +14,20 @@
 //! - 較正 (b): 申告と違う並びを同じ関数で描き、同じ照合器へ通す。
 //!   **その違う並びが返る**。よって照合器は入力で答えを変える。
 //!
+//! # 3. 同じことが dmabuf 経路でも起きるか
+//!
+//! `free schorl.compositor.buffer_import_path` は片道にしない構えである。上の
+//! 1 が通るのは `wl_shm` の経路だけなので、もう一本 (`zwp_linux_dmabuf_v1`) を
+//! 同じ厳しさで測る。
+//!
+//! - shm のクライアントを降ろし、較正 (c): 誰も居ない一枚で照合器が何も
+//!   見つけないことを見る。**次に読めた並びが残像でないこと**がこれで言える。
+//! - 別のプロセス (`schorl-probe-client-dmabuf`) が並びを選んで描く前に申告し、
+//!   GPU 上の `VkImage` を dmabuf として渡す。**`wl_shm` を bind しないので
+//!   退路が無い。**
+//! - 読み戻した絵が申告どおりであることに加えて、台帳の `dmabuf_draws` が
+//!   増え、`shm_draws` が一つも増えていないことを見る。
+//!
 //! # 2. コントローラで toplevel を掴んで置き直せたか
 //!
 //! `pin v1.window_grab`。実在のクライアントが出した toplevel に対して、
@@ -45,8 +59,18 @@ use schorl_core::json::JsonValue;
 use schorl_core::log::{Level, LogRecord, LogSink};
 use schorl_core::time::{Clock, SystemClock};
 use schorl_panel::grab::ControllerId;
+use schorl_render::facts::TextureRoute;
 use schorl_panel::math::{Pose, Quat, Vec3};
 use schorl_xr::{PressState, ThreadSleeper, XrEvent};
+
+/// shm でバッファを出すクライアント。
+const SHM_PROBE: &str = "schorl-probe-client";
+/// そのクライアントが申告に使う綴り。
+const SHM_ANNOUNCEMENT: &str = "schorl-probe-client pattern=";
+/// dmabuf でバッファを出すクライアント。
+const DMABUF_PROBE: &str = "schorl-probe-client-dmabuf";
+/// そのクライアントが申告に使う綴り。
+const DMABUF_ANNOUNCEMENT: &str = "schorl-probe-client-dmabuf pattern=";
 
 /// 掴んで動かす距離 (メートル)。`free` な軸の中の選択。
 const GRAB_SHIFT_M: f32 = 0.30;
@@ -153,8 +177,8 @@ fn run(sink: Arc<StdoutJsonLogSink>, clock: &dyn Clock) -> Result<()> {
     }
 
     // --- クライアントを一本立てて、申告を読む -------------------------------
-    let mut child = spawn_probe(&socket)?;
-    let announced = read_announcement(&mut child)?;
+    let mut child = spawn_probe(SHM_PROBE, &socket)?;
+    let announced = read_announcement(&mut child, SHM_ANNOUNCEMENT)?;
     emit(
         sink.as_ref(),
         clock,
@@ -403,13 +427,225 @@ fn run(sink: Arc<StdoutJsonLogSink>, clock: &dyn Clock) -> Result<()> {
         );
     }
 
+    // --- 3. 同じ一本通しを dmabuf で ----------------------------------------
+    //
+    // ここまでで通ったのは shm 経路だけである (`route` が `shm`)。
+    // `free schorl.compositor.buffer_import_path` は片道にしない構えなので、
+    // もう一方でも**同じ厳しさで**測る: クライアントが描く前に並びを申告し、
+    // それを swapchain から読み戻して照合する。
+    let before = session.xr().render_facts().clone();
+
+    // shm のクライアントを先に降ろす。二枚同時に立つと、view 全体を数える
+    // 照合器がどちらの並びを読んだのか言えなくなる。
+    stop(&mut child);
+    let cleared = session.pump_until(
+        Duration::from_secs(15),
+        Duration::from_millis(2),
+        |s| s.stage().is_empty(),
+    )?;
+    if !cleared {
+        session.close()?;
+        return Err(Error::new(
+            ErrorCode::HostRefused,
+            "the shm client went away but its window never left the stage",
+            TraceId::unattributed(),
+        ));
+    }
+
+    // 較正 (c): クライアントが降りたあとの一枚。**照合器はもう何も見つけない。**
+    // これが在るので、次に読めた並びは「前の走りの残像」ではありえない。
+    let vacated = capture(&mut session, 90)?;
+    let vacated_census = census_bgra(&vacated, width);
+    let vacated_read = read_pattern(&vacated_census, MatchThresholds::DEFAULT);
+    emit(
+        sink.as_ref(),
+        clock,
+        Level::Info,
+        &format!(
+            "calibration c — the frame after the shm client left: {}",
+            JsonValue::Object(vec![
+                (
+                    "non_black_pixels".into(),
+                    JsonValue::Int(vacated_census.non_black_pixels as i64)
+                ),
+                (
+                    "read_pattern".into(),
+                    JsonValue::text(format!("{vacated_read:?}"))
+                ),
+            ])
+            .render()
+        ),
+    );
+    if vacated_read.is_ok() {
+        session.close()?;
+        return Err(Error::new(
+            ErrorCode::Internal,
+            "the reader still found a client pattern after the client had gone",
+            TraceId::unattributed(),
+        ));
+    }
+
+    let mut dmabuf_child = spawn_probe(DMABUF_PROBE, &socket)?;
+    let dmabuf_announced = read_announcement(&mut dmabuf_child, DMABUF_ANNOUNCEMENT)?;
+    emit(
+        sink.as_ref(),
+        clock,
+        Level::Info,
+        &format!(
+            "the dmabuf client announced its own picture before drawing it: {}",
+            JsonValue::Object(vec![
+                (
+                    "pattern".into(),
+                    JsonValue::text(dmabuf_announced.to_letters())
+                ),
+                (
+                    "same_as_the_shm_client".into(),
+                    JsonValue::Bool(dmabuf_announced == announced)
+                ),
+            ])
+            .render()
+        ),
+    );
+
+    let dmabuf_mapped = session.pump_until(
+        Duration::from_secs(30),
+        Duration::from_millis(2),
+        |s| !s.stage().is_empty(),
+    )?;
+    if !dmabuf_mapped {
+        stop(&mut dmabuf_child);
+        session.close()?;
+        return Err(Error::new(
+            ErrorCode::HostRefused,
+            "the dmabuf probe client never put a window on the stage",
+            TraceId::unattributed(),
+        ));
+    }
+
+    let dmabuf_window = session
+        .placements()
+        .first()
+        .map(|p| p.id.clone())
+        .ok_or_else(|| {
+            Error::new(
+                ErrorCode::Internal,
+                "a window is staged but the registry lists none",
+                TraceId::unattributed(),
+            )
+        })?;
+    let dmabuf_route = session.stage().route_of(&dmabuf_window);
+    if dmabuf_route != Some(TextureRoute::Dmabuf) {
+        stop(&mut dmabuf_child);
+        session.close()?;
+        return Err(Error::new(
+            ErrorCode::Internal,
+            "the dmabuf probe client's texture did not come through the dma_buf route",
+            TraceId::unattributed(),
+        )
+        .with_detail("route", dmabuf_route.map_or("none", |r| r.as_str())));
+    }
+
+    let with_dmabuf = capture(&mut session, 120)?;
+    let dmabuf_census = census_bgra(&with_dmabuf, width);
+    let dmabuf_read = read_pattern(&dmabuf_census, MatchThresholds::DEFAULT);
+    let after = session.xr().render_facts().clone();
+    emit(
+        sink.as_ref(),
+        clock,
+        Level::Info,
+        &format!(
+            "read back the dmabuf client's image from the swapchain: {}",
+            JsonValue::Object(vec![
+                (
+                    "window".into(),
+                    JsonValue::text(dmabuf_window.as_str().to_owned())
+                ),
+                (
+                    "texture_route".into(),
+                    JsonValue::text(dmabuf_route.map_or("none", |r| r.as_str()).to_owned())
+                ),
+                (
+                    "announced".into(),
+                    JsonValue::text(dmabuf_announced.to_letters())
+                ),
+                ("read".into(), JsonValue::text(format!("{dmabuf_read:?}"))),
+                ("counts".into(), counts_json(&dmabuf_census)),
+                (
+                    "dmabuf_draws_before".into(),
+                    JsonValue::Int(before.dmabuf_draws as i64)
+                ),
+                (
+                    "dmabuf_draws_after".into(),
+                    JsonValue::Int(after.dmabuf_draws as i64)
+                ),
+                (
+                    "shm_draws_before".into(),
+                    JsonValue::Int(before.shm_draws as i64)
+                ),
+                (
+                    "shm_draws_after".into(),
+                    JsonValue::Int(after.shm_draws as i64)
+                ),
+            ])
+            .render()
+        ),
+    );
+    let dmabuf_read = match dmabuf_read {
+        Ok(pattern) => pattern,
+        Err(miss) => {
+            stop(&mut dmabuf_child);
+            session.close()?;
+            return Err(Error::new(
+                ErrorCode::Internal,
+                "no client quartering was found in the image after the dmabuf client drew",
+                TraceId::unattributed(),
+            )
+            .with_detail("miss", format!("{miss:?}")));
+        }
+    };
+    if dmabuf_read != dmabuf_announced {
+        stop(&mut dmabuf_child);
+        session.close()?;
+        return Err(Error::new(
+            ErrorCode::Internal,
+            "the picture on the swapchain is not the one the dmabuf client announced",
+            TraceId::unattributed(),
+        )
+        .with_detail("announced", dmabuf_announced.to_letters())
+        .with_detail("read", dmabuf_read.to_letters()));
+    }
+    // 経路の申告だけでは足りない。**帳面の側でも dmabuf が増えている**こと、
+    // そして shm が一つも増えていないことを見る。増えていたら、この phase の
+    // 絵は退路から来たことになる。
+    if after.dmabuf_draws <= before.dmabuf_draws {
+        stop(&mut dmabuf_child);
+        session.close()?;
+        return Err(Error::new(
+            ErrorCode::Internal,
+            "the ledger counted no dma_buf draw while the dmabuf client's picture was up",
+            TraceId::unattributed(),
+        )
+        .with_detail("dmabuf_draws", after.dmabuf_draws as i64));
+    }
+    if after.shm_draws != before.shm_draws {
+        stop(&mut dmabuf_child);
+        session.close()?;
+        return Err(Error::new(
+            ErrorCode::Internal,
+            "the shm route kept drawing during the dmabuf phase, so the picture may be the fallback",
+            TraceId::unattributed(),
+        )
+        .with_detail("shm_draws_before", before.shm_draws as i64)
+        .with_detail("shm_draws_after", after.shm_draws as i64));
+    }
+
     let render_facts = session.xr().render_facts().to_json();
     let poses_located = session.hands().map_or(0, |h| h.poses_located());
     let real_grab_changes = session.hands().map_or(0, |h| h.grab_changes());
     let accepted = session.pixels().accepted();
     let refusals = session.pixels().refusals();
 
-    stop(&mut child);
+    stop(&mut dmabuf_child);
     session.close()?;
 
     emit(
@@ -428,6 +664,13 @@ fn run(sink: Arc<StdoutJsonLogSink>, clock: &dyn Clock) -> Result<()> {
                 (
                     "client_frame_reaches_swapchain".into(),
                     JsonValue::Bool(true)
+                ),
+                (
+                    "measured_buffer_routes".into(),
+                    JsonValue::Array(vec![
+                        JsonValue::text(TextureRoute::Shm.as_str().to_owned()),
+                        JsonValue::text(TextureRoute::Dmabuf.as_str().to_owned()),
+                    ])
                 ),
                 (
                     "client_buffers_accepted".into(),
@@ -633,17 +876,18 @@ fn capture(session: &mut SchorlSession, attempts: usize) -> Result<Vec<u8>> {
     ))
 }
 
-fn spawn_probe(socket: &str) -> Result<Child> {
+fn spawn_probe(program_name: &str, socket: &str) -> Result<Child> {
     let program = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join("schorl-probe-client")))
+        .and_then(|p| p.parent().map(|d| d.join(program_name)))
         .filter(|p| p.is_file())
         .ok_or_else(|| {
             Error::new(
                 ErrorCode::CapabilityUnavailable,
-                "schorl-probe-client is not next to this binary",
+                "the probe client is not next to this binary",
                 TraceId::unattributed(),
             )
+            .with_detail("program", program_name)
         })?;
     Command::new(program)
         .env("WAYLAND_DISPLAY", socket)
@@ -662,7 +906,10 @@ fn spawn_probe(socket: &str) -> Result<Child> {
 }
 
 /// クライアントが描く前に出した一行を読む。
-fn read_announcement(child: &mut Child) -> Result<QuadPattern> {
+///
+/// `prefix` はそのクライアントが名乗る綴り。経路ごとに別のバイナリが在るので、
+/// **どのクライアントの申告を読んだかを取り違えない**ために呼び手が渡す。
+fn read_announcement(child: &mut Child, prefix: &str) -> Result<QuadPattern> {
     let stdout = child.stdout.take().ok_or_else(|| {
         Error::new(
             ErrorCode::Internal,
@@ -679,17 +926,15 @@ fn read_announcement(child: &mut Child) -> Result<QuadPattern> {
         )
         .caused_by(e)
     })?;
-    let letters = line
-        .trim()
-        .strip_prefix("schorl-probe-client pattern=")
-        .ok_or_else(|| {
-            Error::new(
-                ErrorCode::InvalidArgument,
-                "the probe client did not announce a pattern",
-                TraceId::unattributed(),
-            )
-            .with_detail("line", line.trim())
-        })?;
+    let letters = line.trim().strip_prefix(prefix).ok_or_else(|| {
+        Error::new(
+            ErrorCode::InvalidArgument,
+            "the probe client did not announce a pattern",
+            TraceId::unattributed(),
+        )
+        .with_detail("expected_prefix", prefix)
+        .with_detail("line", line.trim())
+    })?;
     QuadPattern::from_letters(letters).ok_or_else(|| {
         Error::new(
             ErrorCode::InvalidArgument,

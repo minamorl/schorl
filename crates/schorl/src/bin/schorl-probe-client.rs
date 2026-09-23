@@ -22,9 +22,9 @@
 
 use std::io::Write as _;
 use std::os::unix::net::UnixStream;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
-use schorl::probe::{PureColour, QuadPattern, paint_quadrants};
+use schorl::probe::{QuadPattern, choose_pattern, paint_quadrants};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
@@ -223,29 +223,4 @@ fn scratch_file(pixels: &[u8], near: &std::path::Path) -> Result<std::fs::File, 
     file.flush().map_err(|e| format!("flush {path:?}: {e}"))?;
     let _ = std::fs::remove_file(&path);
     Ok(file)
-}
-
-/// 7 色から 4 色を選んで並べる。
-///
-/// 種は時刻の下位桁とプロセス番号から引く。**秘密ではない**ので、乱数の
-/// capability をこのバイナリへ持ち込まない (`house.effect_boundary.exceptions`
-/// の小さな葉)。
-fn choose_pattern() -> QuadPattern {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0u128, |d| d.as_nanos());
-    let mut state = (nanos as u64) ^ (u64::from(std::process::id()) << 32) ^ 0x9e37_79b9_7f4a_7c15;
-    let mut next = move || {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state
-    };
-    let mut pool: Vec<PureColour> = PureColour::ALL.to_vec();
-    let mut chosen = [PureColour::Red; 4];
-    for slot in &mut chosen {
-        let index = (next() as usize) % pool.len();
-        *slot = pool.remove(index);
-    }
-    QuadPattern { quadrants: chosen }
 }

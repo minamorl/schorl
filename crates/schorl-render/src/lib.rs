@@ -55,7 +55,10 @@ pub mod texture;
 pub mod vulkan;
 pub mod xr;
 
-pub use dmabuf::{DmabufImage, DmabufPlane, DrmFormat, DrmModifier};
+pub use dmabuf::{
+    DmabufDescriptor, DmabufImage, DmabufPlane, DrmFormat, DrmModifier, ExportableImage,
+    ExportedDmabuf,
+};
 pub use facts::{RenderFacts, StdoutLogSink, TextureRoute};
 pub use renderer::{RenderTarget, Renderer};
 pub use space::{Mat4, Surface, SurfaceDraw, SurfaceSize, ViewProjection};

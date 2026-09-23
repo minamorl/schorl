@@ -21,7 +21,9 @@ use schorl_core::error::ErrorCode;
 use schorl_core::frame::{Frame, FrameOrigin, PixelFormat};
 use schorl_core::testing::FixedClock;
 use schorl_core::time::Clock;
-use schorl_render::dmabuf::{DrmFormat, import_own_export_for_measurement};
+use schorl_render::dmabuf::{
+    DmabufImage, DrmFormat, DrmModifier, ExportableImage, import_own_export_for_measurement,
+};
 use schorl_render::facts::TextureRoute;
 use schorl_render::texture::{Texture, sample_texture_to_host};
 use schorl_render::vulkan::VulkanContext;
@@ -255,4 +257,96 @@ fn an_unmappable_fourcc_is_refused_not_guessed() {
     assert!(xrgb.to_vk_format().is_some());
     // 文字列だけを頼りに存在しない形式を作れないことを、綴りの安定で示す。
     assert_eq!(xrgb.as_fourcc_string(), "XR24");
+}
+
+#[test]
+fn an_exportable_image_hands_its_pixels_over_a_dma_buf_fd() {
+    // `ExportableImage` はクライアント側の面である。ここで測るのは
+    // 「export した fd が、受け側 (`DmabufImage::import`) で同じ画素になる」
+    // ところまで。**`zwp_linux_dmabuf_v1` を越える一本通しは
+    // `schorl-seam-check` が別に測る。**
+    with_vulkan(|context| {
+        if !context.supports_dmabuf_import() {
+            eprintln!("skipping: this Vulkan device has no dma_buf import path");
+            return;
+        }
+        let frame = pattern();
+        let exportable = ExportableImage::create(
+            context,
+            WIDTH,
+            HEIGHT,
+            DrmFormat::XRGB8888,
+            // compositor が申告する配置に合わせる。
+            &[DrmModifier::LINEAR],
+        )
+        .expect("a linear exportable image can be created on this device");
+        exportable
+            .fill(context, &frame)
+            .expect("the producer writes its pixels");
+        context.wait_idle().expect("the device goes idle");
+        let exported = exportable.export(context).expect("the dma_buf comes out");
+        assert_eq!(
+            exported.chosen_modifier,
+            DrmModifier::LINEAR,
+            "the allowed set asked for linear, so no other layout may be chosen silently"
+        );
+        assert_eq!(exported.descriptor.planes.len(), 1);
+        assert!(
+            exported.descriptor.planes[0].stride() >= u64::from(WIDTH) * 4,
+            "a row cannot be shorter than its pixels"
+        );
+
+        let imported =
+            DmabufImage::import(context, exported.descriptor).expect("the consumer side imports");
+        let texture =
+            Texture::from_dmabuf(context, imported).expect("the imported image is sampleable");
+        assert_eq!(texture.route(), TextureRoute::Dmabuf);
+        let read_back = sample_texture_to_host(
+            context,
+            &texture,
+            ash::vk::Format::B8G8R8A8_UNORM,
+            WIDTH,
+            HEIGHT,
+        )
+        .expect("the read back succeeds");
+
+        assert!(
+            distinct(&read_back) > 1,
+            "the image read back is flat, so a zero mismatch count proves nothing"
+        );
+        assert_eq!(
+            mismatches(frame.pixels(), &read_back),
+            0,
+            "the pixels the producer wrote did not survive the exported dma_buf"
+        );
+
+        drop(texture);
+        context.wait_idle().expect("the device goes idle");
+        drop(exportable);
+    });
+}
+
+#[test]
+fn an_exportable_image_refuses_a_layout_the_device_does_not_offer() {
+    // 許した配置が一つも使えないとき、**黙って別の配置へ丸めない。**
+    // 丸めてしまうと、compositor が申告していない配置の dmabuf を出すことになる。
+    with_vulkan(|context| {
+        if !context.supports_dmabuf_import() {
+            eprintln!("skipping: this Vulkan device has no dma_buf import path");
+            return;
+        }
+        // vendor 0xfe は `drm_fourcc.h` のどの vendor でもない。
+        let nonsense = DrmModifier::from_u64(0xfe00_0000_0000_0001);
+        let refused = ExportableImage::create(
+            context,
+            WIDTH,
+            HEIGHT,
+            DrmFormat::XRGB8888,
+            &[nonsense],
+        );
+        match refused {
+            Ok(_) => panic!("a layout this device never advertised was accepted"),
+            Err(e) => assert_eq!(e.code(), ErrorCode::Unsupported),
+        }
+    });
 }

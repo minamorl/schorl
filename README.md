@@ -51,15 +51,23 @@ scripts/schorl-hmdless-check.sh
 ```
 
 `monado-service` を起こし、`schorl-seam-check` を走らせ、起こした物を返す。
-検査が見るのは二つで、どちらも同じ走りの中に較正を持っている。
+検査が見るのは三つで、どれも同じ走りの中に較正を持っている。
 
-1. **クライアントの画素が swapchain まで乗ったか。** 外のプロセス
+1. **クライアントの画素が swapchain まで乗ったか (`wl_shm` 経路)。** 外のプロセス
    (`schorl-probe-client`) が 840 通りから四分割の並びを一つ選び、描く前に
    標準出力へ申告する。検査は申告を読み、swapchain の view 0 を読み戻して
    照合する。較正は (a) クライアントが繋がる前の一枚は照合が通らないこと、
    (b) 同じ照合器へ申告と違う並びを通すとその違う並びが返ること。
 2. **コントローラで toplevel を掴んで置き直せたか。** `schorl-panel` の掴みの
    算術を通し、台帳の姿勢が動き、読み戻した絵の中で板が動くところまで。
+3. **同じことが dmabuf 経路でも起きるか。** 1 のクライアントを降ろしてから
+   `schorl-probe-client-dmabuf` を立てる。こちらは `wl_shm` を bind せず、
+   GPU 上の `VkImage` を `zwp_linux_dmabuf_v1` で渡す。**退路が無い。**
+   較正は (c) クライアントが降りた直後の一枚は照合が通らないこと。加えて
+   台帳の `dmabuf_draws` が増え `shm_draws` が一つも増えていないことを見るので、
+   読めた絵が退路から来たものではありえない。この経路には export できる
+   Vulkan (`VK_EXT_external_memory_dma_buf` / `VK_EXT_image_drm_format_modifier`)
+   が要る。
 
 `SCHORL_SEAM_DUMP=<path>` を与えると、ランタイムへ渡した絵を PPM で書き出す。
 

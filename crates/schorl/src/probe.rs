@@ -360,6 +360,36 @@ pub fn paint_quadrants(pattern: QuadPattern, width: u32, height: u32) -> Vec<u8>
     out
 }
 
+/// 7 色から 4 色を選んで並べる。
+///
+/// 種は時刻の下位桁とプロセス番号から引く。**秘密ではない**ので、乱数の
+/// capability をクライアントのバイナリへ持ち込まない
+/// (`house.effect_boundary.exceptions` の小さな葉)。
+///
+/// 並びは 840 通りある。描画側が中身を知らずに当てることはできない、という
+/// のが `pin verify.machine_scope` の `client_frame_reaches_swapchain` を
+/// 測れる形にしている理由である。
+pub fn choose_pattern() -> QuadPattern {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0u128, |d| d.as_nanos());
+    let mut state = (nanos as u64) ^ (u64::from(std::process::id()) << 32) ^ 0x9e37_79b9_7f4a_7c15;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut pool: Vec<PureColour> = PureColour::ALL.to_vec();
+    let mut chosen = [PureColour::Red; 4];
+    for slot in &mut chosen {
+        let index = (next() as usize) % pool.len();
+        *slot = pool.remove(index);
+    }
+    QuadPattern { quadrants: chosen }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

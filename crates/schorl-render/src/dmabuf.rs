@@ -162,6 +162,16 @@ impl DmabufPlane {
         use std::os::fd::AsRawFd as _;
         self.fd.as_raw_fd()
     }
+
+    /// 借りた fd。`zwp_linux_buffer_params_v1.add` へ渡すのに要る。
+    ///
+    /// 所有は移らない。protocol の `fd` 引数は送るときに複製されるので、
+    /// 借用のまま渡してよい (`house.resource_lifecycle.explicit_escape`:
+    /// 所有を出すのは明示のときだけ)。
+    pub fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        use std::os::fd::AsFd as _;
+        self.fd.as_fd()
+    }
 }
 
 /// import できる dmabuf の記述。
@@ -882,6 +892,215 @@ impl ProducerHandles {
         unsafe {
             device.destroy_image(self.image, None);
             device.free_memory(self.memory, None);
+        }
+    }
+}
+
+/// 提出側 (Wayland クライアント) が持つ、dmabuf として取り出せる `VkImage`。
+///
+/// [`import_own_export_for_measurement`] は提出と受け取りを同じ device で閉じて
+/// しまうので、**別プロセスのクライアントが本当に dmabuf を出せるか**は測れない。
+/// この型は提出側だけを切り出したもので、`vkGetMemoryFdKHR` で取り出した fd を
+/// `zwp_linux_dmabuf_v1` へそのまま渡せる形にする。受け側は本番と同じ
+/// [`DmabufImage::import`] である。
+///
+/// 配置 (`DRM format modifier`) は呼び手が絞れる。compositor が申告した modifier の
+/// 中から選ばなければ、出した dmabuf は相手の受け口に合わない。
+///
+/// `house.resource_lifecycle.same_scope` — image と memory は同じ scope で取り、
+/// `Drop` で同じ scope へ返す。
+pub struct ExportableImage {
+    device: ash::Device,
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    format: DrmFormat,
+    width_px: u32,
+    height_px: u32,
+}
+
+impl core::fmt::Debug for ExportableImage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ExportableImage")
+            .field("width_px", &self.width_px)
+            .field("height_px", &self.height_px)
+            .field("format", &self.format.as_fourcc_string())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ExportableImage {
+    /// `VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT` の image を、export 可能な memory で作る。
+    ///
+    /// `allowed` が空でなければ、その配置だけを候補にする。候補が一つも
+    /// 使えないときは封筒で拒む。**使えない配置を黙って別の配置へ丸めない。**
+    pub fn create(
+        context: &VulkanContext,
+        width_px: u32,
+        height_px: u32,
+        format: DrmFormat,
+        allowed: &[DrmModifier],
+    ) -> Result<Self> {
+        let vk_format = format.to_vk_format().ok_or_else(|| {
+            Error::new(
+                ErrorCode::Unsupported,
+                "this DRM fourcc has no Vulkan format in the v1 mapping",
+                TraceId::unattributed(),
+            )
+            .with_detail("fourcc", format.as_fourcc_string())
+        })?;
+        let modifiers: Vec<u64> = query_modifiers(
+            context,
+            vk_format,
+            vk::FormatFeatureFlags::SAMPLED_IMAGE | vk::FormatFeatureFlags::TRANSFER_DST,
+        )?
+        .into_iter()
+        // 面が一つの配置だけ。複数面の配置は v1 の import が扱わない。
+        .filter(|(_, planes)| *planes == 1)
+        .map(|(m, _)| m)
+        .filter(|m| allowed.is_empty() || allowed.contains(m))
+        .map(|m| m.as_u64())
+        .collect();
+        if modifiers.is_empty() {
+            return Err(Error::new(
+                ErrorCode::Unsupported,
+                "no single-plane DRM format modifier this device offers is in the allowed set",
+                TraceId::unattributed(),
+            )
+            .with_detail("fourcc", format.as_fourcc_string())
+            .with_detail("allowed_count", allowed.len() as i64));
+        }
+
+        let device = context.device().clone();
+        let mut external = vk::ExternalMemoryImageCreateInfo::default()
+            .handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
+        // ash はこの二欄に setter を持たないので、生の欄へ直に書く。
+        let mut list = vk::ImageDrmFormatModifierListCreateInfoEXT {
+            drm_format_modifier_count: modifiers.len() as u32,
+            p_drm_format_modifiers: modifiers.as_ptr(),
+            ..Default::default()
+        };
+        let info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(vk_format)
+            .extent(vk::Extent3D {
+                width: width_px,
+                height: height_px,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT)
+            .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .push_next(&mut external)
+            .push_next(&mut list);
+        // SAFETY: info の pNext 鎖と modifiers はこの場の生きた借用。
+        let image = unsafe { device.create_image(&info, None) }
+            .map_err(|e| vulkan_failure("vkCreateImage for the exportable image failed", e))?;
+
+        let bound = || -> Result<vk::DeviceMemory> {
+            // SAFETY: image は直前に作ったもの。
+            let requirements = unsafe { device.get_image_memory_requirements(image) };
+            let memory_type_index = context.find_memory_type(
+                requirements.memory_type_bits,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )?;
+            let mut export = vk::ExportMemoryAllocateInfo::default()
+                .handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
+            let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(image);
+            let allocate = vk::MemoryAllocateInfo::default()
+                .allocation_size(requirements.size)
+                .memory_type_index(memory_type_index)
+                .push_next(&mut export)
+                .push_next(&mut dedicated);
+            // SAFETY: allocate の pNext 鎖はこの場の借用。
+            let memory = unsafe { device.allocate_memory(&allocate, None) }.map_err(|e| {
+                vulkan_failure("vkAllocateMemory for the exportable image failed", e)
+            })?;
+            // SAFETY: image と memory はこの関数の組。
+            match unsafe { device.bind_image_memory(image, memory, 0) } {
+                Ok(()) => Ok(memory),
+                Err(e) => {
+                    // SAFETY: memory は直前に確保したもので、束ねられていない。
+                    unsafe { device.free_memory(memory, None) };
+                    Err(vulkan_failure(
+                        "vkBindImageMemory for the exportable image failed",
+                        e,
+                    ))
+                }
+            }
+        };
+        match bound() {
+            Ok(memory) => Ok(Self {
+                device,
+                image,
+                memory,
+                format,
+                width_px,
+                height_px,
+            }),
+            Err(e) => {
+                // SAFETY: image はこの関数が作ったもの。
+                unsafe { device.destroy_image(image, None) };
+                Err(e)
+            }
+        }
+    }
+
+    /// 画素を書き込む。クライアントが「描いた」ことにあたる。
+    ///
+    /// 戻ったときには GPU の書き込みが終わっている
+    /// ([`crate::texture::stage_pixels_into_image`] が fence を待つ)。
+    pub fn fill(&self, context: &VulkanContext, frame: &schorl_core::frame::Frame) -> Result<()> {
+        crate::texture::stage_pixels_into_image(
+            context,
+            self.image,
+            frame,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )
+    }
+
+    /// dmabuf として取り出す。返る fd の所有は呼び手へ移る。
+    pub fn export(&self, context: &VulkanContext) -> Result<ExportedDmabuf> {
+        // SAFETY: image は DRM tiling で作り、memory を dedicated に束ねてある。
+        unsafe {
+            export_dmabuf(
+                context,
+                self.image,
+                self.memory,
+                self.width_px,
+                self.height_px,
+                self.format,
+            )
+        }
+    }
+
+    /// 横 (画素)。
+    pub const fn width_px(&self) -> u32 {
+        self.width_px
+    }
+
+    /// 縦 (画素)。
+    pub const fn height_px(&self) -> u32 {
+        self.height_px
+    }
+
+    /// fourcc。
+    pub const fn format(&self) -> DrmFormat {
+        self.format
+    }
+}
+
+impl Drop for ExportableImage {
+    fn drop(&mut self) {
+        // SAFETY: この型が作った image と memory を一度だけ壊す。export した fd は
+        // 別の所有者 (呼び手か Vulkan 実装) が持っているので、ここでは触らない。
+        unsafe {
+            self.device.destroy_image(self.image, None);
+            self.device.free_memory(self.memory, None);
         }
     }
 }
