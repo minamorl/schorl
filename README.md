@@ -1,5 +1,7 @@
 # schorl
 
+**状態: Quest 3 実機ではまだ確認していない (not yet verified on a physical Quest 3)。**
+
 Linux 向けの自作 VR 作業環境。真っ暗な 360 度の VR 空間に Linux のウィンドウを置いて作業する。
 schorl 自身が Wayland compositor になり、toplevel を空間へ直接置く
 (`pins/domains/schorl.spec@0.2`)。名前は仮置き。
@@ -46,3 +48,10 @@ scripts/schorl-hmdless-check.sh
 (`pin verify.hmd_gate` / `pin verify.no_green_substitute`)。検査が最後に出す
 `hmd_accepted` は必ず `unknown` であり、掴みボタンを押したのが人でないことは
 `synthetic_controller_events` の欄で申告される。
+
+## ライセンス
+
+MIT OR Apache-2.0 の dual。[LICENSE-MIT](LICENSE-MIT) と
+[LICENSE-APACHE](LICENSE-APACHE) のどちらかを選べる ([LICENSE](LICENSE))。
+package registry (crates.io 等) へは出さない (`pin release.no_registry_publish`、
+workspace の `publish = false`)。

@@ -8,9 +8,13 @@
 # dmabuf / shm のテクスチャを貼って OpenXR の swapchain へ描き込む
 # (space.background / space.extent / v1.window_displayed / v1.window_count)。
 # この manifest が満たす pin:
-#   release.no_publication  — workspace.package.publish = false (crates.io へは出さない)
-#   release.local_git_only  — remote を足さない。ここには何も書けないので運用側の掟。
-#   host.platform           — linux 前提 (crate schorl-scope が型で持つ)
+#   release.no_registry_publish — workspace.package.publish = false (crates.io へは出さない)。
+#                                 全 crate が publish.workspace = true で受けているので、
+#                                 cargo publish はここで機械的に止まる。
+#   public.license_file         — workspace.package.license = "MIT OR Apache-2.0" と、
+#                                 LICENSE / LICENSE-APACHE / LICENSE-MIT の実ファイル。
+#                                 何を置くかは free schorl.repository.license_choice。
+#   host.platform               — linux 前提 (crate schorl-scope が型で持つ)
 #
 # free schorl.implementation.language / free schorl.build_system を Rust + cargo で
 # 埋めている。spec が自由と明示した軸なので、選択そのものは pin 違反ではない。
@@ -37,6 +41,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
 publish = false
+license = "MIT OR Apache-2.0"
 
 [workspace.lints.rust]
 missing_docs = "deny"

@@ -1,2 +1,4 @@
+# ビルド生成物は repo の中身にしない (pin public.no_build_artifacts)。
 /target
+**/target/
 **/*.rs.bk
