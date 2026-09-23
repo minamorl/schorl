@@ -161,12 +161,23 @@ fn scratch_file(size: usize, near: &std::path::Path) -> Result<std::fs::File, St
     Ok(file)
 }
 
+/// 前提の門。**欠けていたら緑を返さず、何が無いかを名指しして落ちる。**
+///
+/// 以前はここで黙って `return` していた。schorl のソケットを置く場所が無い機械では
+/// 何も測れないが、何も測れなかった走りを `ok` として数えると緑の意味が薄まる。
+fn require_runtime_dir() -> String {
+    std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+        panic!(
+            "XDG_RUNTIME_DIR is not set, so schorl cannot place its own wayland socket \
+             and this check would measure nothing. run it inside a user session, or point \
+             XDG_RUNTIME_DIR at a writable directory."
+        )
+    })
+}
+
 #[test]
 fn a_client_can_hand_schorl_a_dmabuf_and_schorl_passes_it_on() {
-    if std::env::var("XDG_RUNTIME_DIR").is_err() {
-        eprintln!("no XDG_RUNTIME_DIR: nothing can be measured here");
-        return;
-    }
+    let _runtime_dir = require_runtime_dir();
 
     let recorder = RecordingImporter::new();
     let ids = Arc::new(Uuidv7IdGen);

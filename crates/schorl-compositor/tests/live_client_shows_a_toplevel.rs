@@ -7,7 +7,9 @@
 //! **これは受け入れではない** (`pin verify.no_green_substitute`)。
 //! HMD を被った確認の代わりにはならない。
 //!
-//! クライアントが居ない機械では何も言えないので、その場合は黙って通す。
+//! **前提が欠けたときに緑を返さない。** クライアントの居ない機械・ソケットを
+//! 置く場所の無い機械では、何も測れなかったことを `ok` として数えず、何が無くて
+//! 走れないかを名指しして落ちる。以前はここで黙って `return` していた。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,14 +19,16 @@ use schorl_compositor::journal::{Journal, StderrJsonLogSink, Uuidv7IdGen};
 use schorl_compositor::state::CompositorSetup;
 use schorl_core::time::SystemClock;
 
+/// 試せる軽い xdg-shell クライアントの候補。落ちるときに名指しするので定数に出す。
+const CLIENT_CANDIDATES: [&[&str]; 3] = [
+    &["weston-simple-shm"],
+    &["foot", "--"],
+    &["weston-terminal"],
+];
+
 /// この機で試せる軽い xdg-shell クライアントを一つ選ぶ。
 fn pick_client() -> Option<Vec<String>> {
-    let candidates: [&[&str]; 3] = [
-        &["weston-simple-shm"],
-        &["foot", "--"],
-        &["weston-terminal"],
-    ];
-    for argv in candidates {
+    for argv in CLIENT_CANDIDATES {
         let program = argv[0];
         if which(program) {
             let mut v: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
@@ -36,6 +40,29 @@ fn pick_client() -> Option<Vec<String>> {
         }
     }
     None
+}
+
+/// 前提の門。**欠けていたら緑を返さず、何が無いかを名指しして落ちる。**
+fn require_runtime_dir() -> String {
+    std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+        panic!(
+            "XDG_RUNTIME_DIR is not set, so schorl cannot place its own wayland socket \
+             and this check would measure nothing. run it inside a user session, or point \
+             XDG_RUNTIME_DIR at a writable directory."
+        )
+    })
+}
+
+/// 同じく前提の門。クライアントが一本も無ければ測れないので、そのときは落ちる。
+fn require_client() -> Vec<String> {
+    pick_client().unwrap_or_else(|| {
+        let names: Vec<&str> = CLIENT_CANDIDATES.iter().map(|argv| argv[0]).collect();
+        panic!(
+            "no light xdg-shell client on this machine, so nothing would be measured. \
+             install one of {names:?} (weston-simple-shm and weston-terminal come from the \
+             `weston` package, foot from `foot`)."
+        )
+    })
 }
 
 fn which(program: &str) -> bool {
@@ -57,14 +84,8 @@ fn setup() -> CompositorSetup {
 
 #[test]
 fn a_real_client_connects_to_schorls_own_socket_and_maps_a_toplevel() {
-    if std::env::var("XDG_RUNTIME_DIR").is_err() {
-        eprintln!("no XDG_RUNTIME_DIR: this machine cannot say anything here");
-        return;
-    }
-    let Some(client) = pick_client() else {
-        eprintln!("no light xdg-shell client on this machine: nothing measured");
-        return;
-    };
+    let _runtime_dir = require_runtime_dir();
+    let client = require_client();
 
     let outcome = run_headless(
         setup(),
@@ -94,9 +115,7 @@ fn a_real_client_connects_to_schorls_own_socket_and_maps_a_toplevel() {
 
 #[test]
 fn the_socket_file_is_gone_once_the_run_is_over() {
-    let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") else {
-        return;
-    };
+    let runtime_dir = require_runtime_dir();
     let outcome = run_headless(
         setup(),
         HeadlessOptions {
@@ -119,9 +138,15 @@ fn the_socket_file_is_gone_once_the_run_is_over() {
 
 #[test]
 fn schorl_never_takes_the_host_compositors_socket() {
-    let Ok(host) = std::env::var("WAYLAND_DISPLAY") else {
-        return;
-    };
+    let _runtime_dir = require_runtime_dir();
+
+    // 宿主の居ない機械でも測れるように、**前提を自分で用意する**。先に一本立てて
+    // 座を一つ埋め、そのうえで測る側を立てる。以前はここで `WAYLAND_DISPLAY` が
+    // 無ければ黙って `return` しており、宿主の無い機械では空振りの緑だった。
+    let occupant = schorl_compositor::driver::HeadlessSession::start(setup())
+        .expect("a first schorl takes a socket");
+    let occupied = occupant.socket_name().to_owned();
+
     let outcome = run_headless(
         setup(),
         HeadlessOptions {
@@ -132,21 +157,30 @@ fn schorl_never_takes_the_host_compositors_socket() {
         },
     )
     .expect("the compositor runs");
-    assert_ne!(
-        outcome.socket, host,
-        "pin wm.host_compositor_coexistence: the host keeps its own socket"
+
+    eprintln!(
+        "the second schorl took {:?}; the first one holds {occupied:?}",
+        outcome.socket
     );
+    assert_ne!(
+        outcome.socket, occupied,
+        "pin wm.host_compositor_coexistence: a socket someone already holds is not schorl's \
+         to take"
+    );
+    // 宿主が居る機械では、その宿主の座も名指しで測る。
+    if let Ok(host) = std::env::var("WAYLAND_DISPLAY") {
+        assert_ne!(
+            outcome.socket, host,
+            "pin wm.host_compositor_coexistence: the host keeps its own socket"
+        );
+    }
+    drop(occupant);
 }
 
 #[test]
 fn two_real_clients_get_two_windows_side_by_side() {
-    if std::env::var("XDG_RUNTIME_DIR").is_err() {
-        return;
-    }
-    let Some(argv) = pick_client() else {
-        eprintln!("no light xdg-shell client on this machine: nothing measured");
-        return;
-    };
+    let _runtime_dir = require_runtime_dir();
+    let argv = require_client();
 
     let mut session =
         schorl_compositor::driver::HeadlessSession::start(setup()).expect("schorl starts");

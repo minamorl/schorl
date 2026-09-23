@@ -1,6 +1,6 @@
 //! `schorl-render` — 絵を出す側。
 //!
-//! この crate が満たす pin (`spec-system/pins/domains/schorl.spec@0.2` と、そこが
+//! この crate が満たす pin (`spec-system/pins/domains/schorl.spec@0.4` と、そこが
 //! import する `house_style@4.0` → `prohibitions@1.0`):
 //!
 //! - `space.background: require schorl.virtual_space.background = black` —

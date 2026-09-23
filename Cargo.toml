@@ -1,6 +1,6 @@
 # schorl workspace — Linux 向け VR 作業環境 schorl の第一版の骨格。
 #
-# 由来: pins/domains/schorl.spec@0.2 (import house_style@4.0 -> prohibitions@1.0)。
+# 由来: pins/domains/schorl.spec@0.4 (import house_style@4.0 -> prohibitions@1.0)。
 # 0.2 の原文3 で v1 から外れた経路 (crates/schorl-capture, crates/schorl-display,
 # crates/schorl-panel-driver) は member に残してあるが、crate schorl はどれにも
 # 依存しない。残す理由は実測資産だから。

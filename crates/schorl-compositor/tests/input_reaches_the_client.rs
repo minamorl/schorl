@@ -313,12 +313,23 @@ fn setup() -> CompositorSetup {
     CompositorSetup::new(ids, journal)
 }
 
+/// 前提の門。**欠けていたら緑を返さず、何が無いかを名指しして落ちる。**
+///
+/// 以前はここで黙って `return` していた。schorl のソケットを置く場所が無い機械では
+/// 何も測れないが、何も測れなかった走りを `ok` として数えると緑の意味が薄まる。
+fn require_runtime_dir() -> String {
+    std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+        panic!(
+            "XDG_RUNTIME_DIR is not set, so schorl cannot place its own wayland socket \
+             and this check would measure nothing. run it inside a user session, or point \
+             XDG_RUNTIME_DIR at a writable directory."
+        )
+    })
+}
+
 #[test]
 fn a_click_and_a_key_reach_the_client_with_surface_local_coordinates() {
-    if std::env::var("XDG_RUNTIME_DIR").is_err() {
-        eprintln!("no XDG_RUNTIME_DIR: nothing can be measured here");
-        return;
-    }
+    let _runtime_dir = require_runtime_dir();
 
     let mut session = HeadlessSession::start(setup()).expect("schorl starts");
     let path = session.socket_path().expect("the socket has a path");
@@ -423,10 +434,7 @@ fn a_click_and_a_key_reach_the_client_with_surface_local_coordinates() {
 
 #[test]
 fn a_controller_ray_projected_onto_the_window_plane_lands_on_the_right_pixel() {
-    if std::env::var("XDG_RUNTIME_DIR").is_err() {
-        eprintln!("no XDG_RUNTIME_DIR: nothing can be measured here");
-        return;
-    }
+    let _runtime_dir = require_runtime_dir();
 
     let mut session = HeadlessSession::start(setup()).expect("schorl starts");
     let path = session.socket_path().expect("the socket has a path");

@@ -9,16 +9,20 @@
 //! (`verify.no_green_substitute` / `property verify.green_is_not_acceptance`)。
 //! この検査が緑でも Quest 3 の受け入れは `unknown` のままである。
 //!
-//! 走らせ方 (環境が要るので既定では走らない):
+//! 走らせ方 (実在の compositor が要るので `#[ignore]` を付けてある。既定の
+//! `cargo test --workspace` では走らず、**走らなかったことは `ignored` として
+//! 出力に残る**):
 //!
 //! ```text
-//! SCHORL_REAL_HOST=1 WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/run/user/1000 \
-//!   cargo test -p schorl-capture --test real_host_capture -- --nocapture
+//! WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/run/user/1000 \
+//!   cargo test -p schorl-capture --test real_host_capture -- --ignored --nocapture
 //! ```
 //!
-//! `SCHORL_REAL_HOST` が無いときは黙って緑にせず、飛ばしたことを標準エラーへ
-//! 書いてから抜ける。compositor の無い機械で `cargo test --workspace` を
-//! 赤にしないためだが、飛ばしたことは隠さない。
+//! 以前はここに `SCHORL_REAL_HOST` という環境変数の門が在り、無いときは
+//! 「飛ばした」と標準エラーへ書いて `ok` を返していた。**何も触っていない走りが
+//! `ok` として数えられるのをやめる。** 前提 (`hyprctl` の在る実 compositor /
+//! `WAYLAND_DISPLAY` / `XDG_RUNTIME_DIR`) が欠けたまま `--ignored` で呼べば、
+//! この検査は緑を返さずその場で落ちる。
 
 use std::env;
 use std::sync::Arc;
@@ -36,7 +40,6 @@ use schorl_display::hyprland::{
 use schorl_display::{OutputRequest, VirtualOutputProvider, assert_runtime_only};
 use schorl_verify::{CheckOutcome, MachineCheck, MachineRun, hmd_acceptance_from_machine};
 
-const OPT_IN: &str = "SCHORL_REAL_HOST";
 const PANEL_WIDTH: u32 = 1280;
 const PANEL_HEIGHT: u32 = 720;
 const PANEL_REFRESH_MILLIHZ: u32 = 60_000;
@@ -44,15 +47,9 @@ const PANEL_REFRESH_MILLIHZ: u32 = 60_000;
 const POISON: u8 = 0xA5;
 
 #[test]
+#[ignore = "needs a live wlroots-style host compositor: hyprctl on PATH, WAYLAND_DISPLAY \
+            naming its socket, and XDG_RUNTIME_DIR; run with --ignored"]
 fn the_host_returns_a_real_frame_from_an_output_schorl_created_and_removed() {
-    if env::var_os(OPT_IN).is_none() {
-        eprintln!(
-            "SKIPPED: {OPT_IN} is not set, so this check did not touch a compositor. \
-             nothing was measured."
-        );
-        return;
-    }
-
     let wayland_display =
         env::var("WAYLAND_DISPLAY").expect("WAYLAND_DISPLAY must point at the host compositor");
     let runtime_dir = env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR must be set");
