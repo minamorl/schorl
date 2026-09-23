@@ -10,6 +10,25 @@ schorl 自身が Wayland compositor になり、toplevel を空間へ直接置�
 外れた。`schorl-capture` / `schorl-display` / `schorl-panel-driver` はその経路の
 実測資産として workspace に残してあるが、v1 のバイナリはどれも通らない。
 
+## 建てる
+
+```
+cargo build --workspace
+```
+
+shader は GLSL の source (`crates/schorl-render/shaders/*.vert`, `*.frag`) だけを
+repo に置き、SPIR-V は build script が `OUT_DIR` へ焼く (`pin public.no_build_artifacts`)。
+そのため生成器が要る。
+
+```
+apt install glslang-tools   # glslangValidator。必須
+apt install spirv-tools     # spirv-val。焼いた物の検証に使う。任意
+```
+
+無ければ build は黙って壊れず、何を探したかと入れ方を書いて止まる。別の場所の物を
+使うなら `SCHORL_GLSL_COMPILER` / `SCHORL_SPIRV_VAL` で名指しする
+(`glslc` でも焼ける)。
+
 ## 走らせる
 
 `schorl` は一本のプログラムである。自分の Wayland ソケットを取り、繋いできた
