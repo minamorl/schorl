@@ -24,6 +24,7 @@ members = [
     "crates/schorl-xr",
     "crates/schorl-panel-driver",
     "crates/schorl-verify",
+    "crates/schorl-compositor",
     "crates/schorl",
 ]
 
@@ -47,3 +48,4 @@ schorl-input = { path = "crates/schorl-input" }
 schorl-xr = { path = "crates/schorl-xr" }
 schorl-panel-driver = { path = "crates/schorl-panel-driver" }
 schorl-verify = { path = "crates/schorl-verify" }
+schorl-compositor = { path = "crates/schorl-compositor" }
