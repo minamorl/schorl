@@ -31,6 +31,22 @@ use schorl_xr::{SessionConfig, XrRuntime};
 
 pub mod stdout_log;
 
+// --- v1 の配線 ---------------------------------------------------------------
+// ここから下は「compositor 面と描画面を一本に繋ぐ」ための面である。
+// どちらの crate も相手を知らないので、両方を知るのはこの境界だけになる
+// (`house.effect_boundary.location = injected_at_boundary`)。
+pub mod grab;
+pub mod hands;
+pub mod pixels;
+pub mod probe;
+pub mod session;
+pub mod stage;
+
+pub use grab::{GrabEffect, WindowGrabs, WindowPlacement};
+pub use hands::{BoundSources, HandInput};
+pub use pixels::{ClientBuffer, ClientPixelRelay, PixelInbox};
+pub use session::{SchorlSession, SessionOptions, StepOutcome};
+pub use stage::{Stage, StageReport};
 pub use stdout_log::StdoutJsonLogSink;
 
 /// 注入する capability 一式。

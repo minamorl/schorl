@@ -41,7 +41,8 @@ pub mod window;
 pub mod nested;
 
 pub use buffer::{
-    ClientBufferKind, ClientTextureImporter, DmabufHandoff, RecordingImporter, ShmBufferView,
+    ClientBufferKind, ClientTextureImporter, Dmabuf, DmabufDimensions, DmabufHandoff,
+    RecordingImporter, ShmBufferView,
 };
 pub use journal::Journal;
 pub use socket::{OwnedSocket, SocketName};

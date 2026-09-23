@@ -361,6 +361,7 @@ impl XrVulkanRuntime {
             facts: facts_head,
             render_facts: facts,
             ready_wait: self.ready_wait,
+            last_display_time: None,
         })
     }
 }
@@ -408,6 +409,12 @@ pub struct XrVulkanSession {
     facts: XrVulkanFacts,
     render_facts: RenderFacts,
     ready_wait: RetryPolicy,
+    /// 直近の `xrWaitFrame` が返した予測表示時刻。
+    ///
+    /// `xrLocateSpace` / `xrSyncActions` は時刻を要る。手の姿勢を引く面は
+    /// この session の外に居るので、こちらが観測した時刻を読める口を開ける。
+    /// **この欄は描画の判断に使われない** — 記録するだけである。
+    last_display_time: Option<openxr::Time>,
 }
 
 impl core::fmt::Debug for XrVulkanSession {
@@ -444,6 +451,29 @@ impl XrVulkanSession {
     /// `system` id。
     pub const fn system(&self) -> openxr::SystemId {
         self.system
+    }
+
+    /// OpenXR の instance。
+    ///
+    /// action set を張る面はこの crate の外に居る (掴みは `schorl-panel` の算術で、
+    /// 配線は境界の仕事である)。読み取りの借用だけを開ける。
+    pub const fn openxr_instance(&self) -> &openxr::Instance {
+        &self.instance
+    }
+
+    /// OpenXR の session。action set を attach する面が要る。
+    pub const fn openxr_session(&self) -> &openxr::Session<openxr::Vulkan> {
+        &self.session
+    }
+
+    /// 描いている参照空間。手の姿勢をこの空間で引くために要る。
+    pub const fn reference_space(&self) -> &openxr::Space {
+        &self.space
+    }
+
+    /// 直近の `xrWaitFrame` が返した予測表示時刻。まだ一枚も待っていなければ `None`。
+    pub const fn last_display_time(&self) -> Option<openxr::Time> {
+        self.last_display_time
     }
 
     /// 出来事を吸って状態を進める。
@@ -547,6 +577,7 @@ impl XrVulkanSession {
             .frame_waiter
             .wait()
             .map_err(|e| openxr_failure("xrWaitFrame failed", e))?;
+        self.last_display_time = Some(frame_state.predicted_display_time);
         self.frame_stream
             .begin()
             .map_err(|e| openxr_failure("xrBeginFrame failed", e))?;

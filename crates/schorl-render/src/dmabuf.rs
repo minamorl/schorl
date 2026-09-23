@@ -63,6 +63,14 @@ impl DrmFormat {
         self.0
     }
 
+    /// クライアントが提出した生の fourcc を包む。
+    ///
+    /// 検めない。`drm_fourcc.h` の語は二枝より広く、こちらが上限を発明しては
+    /// ならないからである。使えるかどうかは [`Self::to_vk_format`] が言う。
+    pub const fn from_u32(value: u32) -> Self {
+        Self(value)
+    }
+
     /// 四文字の綴り。報告に貼るため。
     pub fn as_fourcc_string(self) -> String {
         let bytes = self.0.to_le_bytes();

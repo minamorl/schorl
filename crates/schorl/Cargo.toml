@@ -13,6 +13,17 @@ schorl-panel.workspace = true
 schorl-input.workspace = true
 schorl-xr.workspace = true
 schorl-verify.workspace = true
+# v1 の製品バイナリは compositor 面と描画面を一本に配線する。この二本が
+# 依存に居ないと、両者は別々に測れるだけで繋がっていない。
+schorl-compositor.workspace = true
+schorl-render.workspace = true
+# 掴みの入口 (action set と手の姿勢) をランタイムから引く。版は schorl-xr /
+# schorl-render と揃える。
+openxr = "0.22.0"
+# HMD 無しの検証で立てる、既知の絵を描くだけのクライアント。
+# 既存の試験用クライアントと同じ版を使う。
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
 
 [lints]
 workspace = true

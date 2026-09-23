@@ -1194,12 +1194,17 @@ dependencies = [
 name = "schorl"
 version = "0.1.0"
 dependencies = [
+ "openxr",
+ "schorl-compositor",
  "schorl-core",
  "schorl-input",
  "schorl-panel",
+ "schorl-render",
  "schorl-scope",
  "schorl-verify",
  "schorl-xr",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]
