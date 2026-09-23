@@ -1,154 +1,31 @@
-//! `schorl-capture` — 板に貼る絵を Linux 側から取る。
+//! `schorl-capture` — Linux 側の出力から実フレームを取る。
 //!
-//! 満たす pin:
+//! **spec 0.2 の原文3「360度あるならそれ用にウィンドウマネージャー作るだけでいいのでは？」
+//! でこの経路は v1 から外れた。消していないのは、これがこの repo で唯一の実測資産
+//! (実ホストで wlr-screencopy v3 から実フレームが取れた証拠) であり、
+//! 既存 Hyprland の窓を VR から見る将来の口でもあるため。**
+//!
+//! 満たしていた pin (いずれも原文3 で退役):
 //! - `v1.panel_source: require schorl.v1.panel.content_source = linux_display` —
 //!   [`FrameSource`] は [`OutputId`] を指定して取る。取り口はそれだけ。
 //! - `verify.machine_scope` の `capture_returns_real_frame` — [`FrameOrigin`] が
 //!   本物か贋物かを持ち歩くので、贋物のフレームで「捕捉できた」と言えない。
+//!   (0.2 でこの項目は `client_frame_reaches_swapchain` へ改鍵された。)
 //! - `house.effect_boundary.*` — 捕捉だけを持つ最小の capability。
 //!
-//! どの protocol で取るか (`free schorl.capture.protocol` /
-//! `free schorl.capture.protocol_version`) はここでは決めない。決まっているのは
-//! 「どの出力から取るか」「取れた絵は何か」「本物か」だけ。
+//! 絵そのものを表す [`Frame`] / [`FrameOrigin`] / [`PixelFormat`] は
+//! [`schorl_core::frame`] へ移した。`client_frame_reaches_swapchain` は取り口に
+//! 依存しないので、v1 の経路がこの crate を通らずに絵を運べる必要がある。
+//! ここでは同じ名前で再輸出しているだけで、公開面も振る舞いも変えていない。
 //! 実ホスト向けの実装は [`screencopy`] にある (wlr-screencopy v3)。
 
 pub mod screencopy;
 
-use schorl_core::error::{Error, ErrorCode, Result};
-use schorl_core::id::TraceId;
+use schorl_core::error::Result;
 use schorl_core::time::UtcTimestamp;
 use schorl_display::OutputId;
 
-/// 画素の並び。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PixelFormat {
-    /// 8bit ずつの BGRX (little endian の 0xXXRRGGBB)。
-    Xrgb8888,
-    /// 8bit ずつの BGRA。
-    Argb8888,
-}
-
-impl PixelFormat {
-    /// 1 画素の byte 数。
-    pub const fn bytes_per_pixel(self) -> u32 {
-        match self {
-            PixelFormat::Xrgb8888 | PixelFormat::Argb8888 => 4,
-        }
-    }
-}
-
-/// そのフレームがどこから来たか。
-///
-/// 「捕捉が実フレームを返した」という機械検査を、贋物で緑にさせないために要る。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FrameOrigin {
-    /// ホストの compositor から実際に取れた絵。
-    RealCapture,
-    /// 試験用に組み立てた絵。実フレームとは数えない。
-    TestDouble,
-}
-
-/// 取れた一枚。
-#[derive(Debug, Clone, PartialEq)]
-pub struct Frame {
-    origin: FrameOrigin,
-    format: PixelFormat,
-    width_px: u32,
-    height_px: u32,
-    stride_bytes: u32,
-    captured_at: UtcTimestamp,
-    pixels: Vec<u8>,
-}
-
-impl Frame {
-    /// 画素の入れ物と寸法から作る。寸法が合わなければ封筒で拒む。
-    pub fn new(
-        origin: FrameOrigin,
-        format: PixelFormat,
-        width_px: u32,
-        height_px: u32,
-        stride_bytes: u32,
-        captured_at: UtcTimestamp,
-        pixels: Vec<u8>,
-    ) -> Result<Self> {
-        if width_px == 0 || height_px == 0 {
-            return Err(Error::new(
-                ErrorCode::InvalidArgument,
-                "frame must have a non-zero extent",
-                TraceId::unattributed(),
-            ));
-        }
-        let minimum_stride = width_px.saturating_mul(format.bytes_per_pixel());
-        if stride_bytes < minimum_stride {
-            return Err(Error::new(
-                ErrorCode::InvalidArgument,
-                "frame stride is smaller than one row of pixels",
-                TraceId::unattributed(),
-            )
-            .with_detail("stride_bytes", i64::from(stride_bytes))
-            .with_detail("minimum_stride", i64::from(minimum_stride)));
-        }
-        let expected = (stride_bytes as usize).saturating_mul(height_px as usize);
-        if pixels.len() != expected {
-            return Err(Error::new(
-                ErrorCode::InvalidArgument,
-                "frame buffer length does not match stride times height",
-                TraceId::unattributed(),
-            )
-            .with_detail("expected", expected as i64)
-            .with_detail("actual", pixels.len() as i64));
-        }
-        Ok(Self {
-            origin,
-            format,
-            width_px,
-            height_px,
-            stride_bytes,
-            captured_at,
-            pixels,
-        })
-    }
-
-    /// 出所。
-    pub const fn origin(&self) -> FrameOrigin {
-        self.origin
-    }
-
-    /// ホストから実際に取れた絵か。
-    pub const fn is_real_capture(&self) -> bool {
-        matches!(self.origin, FrameOrigin::RealCapture)
-    }
-
-    /// 画素の並び。
-    pub const fn format(&self) -> PixelFormat {
-        self.format
-    }
-
-    /// 横の画素数。
-    pub const fn width_px(&self) -> u32 {
-        self.width_px
-    }
-
-    /// 縦の画素数。
-    pub const fn height_px(&self) -> u32 {
-        self.height_px
-    }
-
-    /// 行あたりの byte 数。
-    pub const fn stride_bytes(&self) -> u32 {
-        self.stride_bytes
-    }
-
-    /// 取れた時刻 (UTC)。
-    pub const fn captured_at(&self) -> UtcTimestamp {
-        self.captured_at
-    }
-
-    /// 画素。
-    pub fn pixels(&self) -> &[u8] {
-        &self.pixels
-    }
-}
+pub use schorl_core::frame::{Frame, FrameOrigin, PixelFormat};
 
 /// 出力から一枚取る capability。
 ///
@@ -216,67 +93,5 @@ mod tests {
         assert_eq!(frame.origin(), FrameOrigin::TestDouble);
         assert!(!frame.is_real_capture());
         assert_eq!(frame.pixels().len(), 4 * 4 * 2);
-    }
-
-    #[test]
-    fn a_real_frame_reports_itself_as_real() {
-        let frame = Frame::new(
-            FrameOrigin::RealCapture,
-            PixelFormat::Argb8888,
-            2,
-            2,
-            8,
-            at(5),
-            vec![0; 16],
-        )
-        .expect("valid frame");
-        assert!(frame.is_real_capture());
-        assert_eq!(frame.captured_at(), at(5));
-        assert_eq!(frame.stride_bytes(), 8);
-    }
-
-    #[test]
-    fn a_buffer_that_does_not_match_the_stride_is_refused() {
-        let err = Frame::new(
-            FrameOrigin::RealCapture,
-            PixelFormat::Xrgb8888,
-            2,
-            2,
-            8,
-            at(0),
-            vec![0; 15],
-        )
-        .expect_err("short buffer");
-        assert_eq!(err.code(), ErrorCode::InvalidArgument);
-    }
-
-    #[test]
-    fn a_stride_narrower_than_one_row_is_refused() {
-        let err = Frame::new(
-            FrameOrigin::RealCapture,
-            PixelFormat::Xrgb8888,
-            4,
-            1,
-            8,
-            at(0),
-            vec![0; 8],
-        )
-        .expect_err("narrow stride");
-        assert_eq!(err.code(), ErrorCode::InvalidArgument);
-    }
-
-    #[test]
-    fn a_zero_sized_frame_is_refused() {
-        let err = Frame::new(
-            FrameOrigin::RealCapture,
-            PixelFormat::Xrgb8888,
-            0,
-            1,
-            0,
-            at(0),
-            Vec::new(),
-        )
-        .expect_err("zero extent");
-        assert_eq!(err.code(), ErrorCode::InvalidArgument);
     }
 }

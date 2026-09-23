@@ -1,7 +1,11 @@
 //! 実ホストで本当にフレームが返るかを確かめる検査。
 //!
-//! `verify.machine_scope` の `capture_returns_real_frame` を、贋物ではなく実物で
-//! 埋めるためのもの。**これは機械の緑であって受け入れではない**
+//! 0.1 の `verify.machine_scope` の `capture_returns_real_frame` を、贋物ではなく
+//! 実物で埋めるためのものだった。**spec 0.2 の原文3 でその項目は
+//! `client_frame_reaches_swapchain` へ改鍵され、この経路は v1 から外れた。**
+//! ここで測っているのはホストの画面であってクライアントの一枚ではないので、
+//! この検査は 0.2 の五項目をどれも埋めない (下を見よ)。
+//! **これは機械の緑であって受け入れではない**
 //! (`verify.no_green_substitute` / `property verify.green_is_not_acceptance`)。
 //! この検査が緑でも Quest 3 の受け入れは `unknown` のままである。
 //!
@@ -44,7 +48,7 @@ fn the_host_returns_a_real_frame_from_an_output_schorl_created_and_removed() {
     if env::var_os(OPT_IN).is_none() {
         eprintln!(
             "SKIPPED: {OPT_IN} is not set, so this check did not touch a compositor. \
-             capture_returns_real_frame stays NotRun."
+             nothing was measured."
         );
         return;
     }
@@ -92,7 +96,7 @@ fn the_host_returns_a_real_frame_from_an_output_schorl_created_and_removed() {
     };
 
     let created_name;
-    let mut run = MachineRun::new();
+    let run = MachineRun::new();
     {
         let output = provider
             .create(&request)
@@ -169,7 +173,10 @@ fn the_host_returns_a_real_frame_from_an_output_schorl_created_and_removed() {
             frame.captured_at().millis_since_epoch(),
         );
 
-        run = run.record(MachineCheck::CaptureReturnsRealFrame, CheckOutcome::Green);
+        // 0.1 ではここで `MachineCheck::CaptureReturnsRealFrame` を緑にしていた。
+        // 0.2 にその枝は無い。残った `client_frame_reaches_swapchain` を緑にするのは
+        // **誤り**である — ここに client も swapchain も出てこないので、埋めたら
+        // 測っていないものを緑と言うことになる。だから五項目はどれも NotRun のまま。
         // ここで `output` が落ちる。`Drop` が hyprctl output remove を呼ぶ。
     }
 
@@ -185,13 +192,19 @@ fn the_host_returns_a_real_frame_from_an_output_schorl_created_and_removed() {
         "outputs owned by other programs must be untouched"
     );
 
-    // 機械が緑でも、実機受け入れは unknown のまま。
-    assert_eq!(
-        run.outcome(MachineCheck::CaptureReturnsRealFrame),
-        CheckOutcome::Green
-    );
+    // v1 の五項目はどれも埋まっていない。埋まっていないことを型で言う。
+    for check in MachineCheck::ALL {
+        assert_eq!(
+            run.outcome(check),
+            CheckOutcome::NotRun,
+            "a retired-path capture fills none of the spec 0.2 machine checks: {}",
+            check.as_str()
+        );
+    }
+    // そして機械がどうであれ、実機受け入れは unknown のまま。
     eprintln!(
-        "machine: capture_returns_real_frame=green; hmd_acceptance={:?} (verify.no_green_substitute)",
+        "machine: spec 0.2 checks all not_run (retired path); hmd_acceptance={:?} \
+         (verify.no_green_substitute)",
         hmd_acceptance_from_machine(&run)
     );
 }

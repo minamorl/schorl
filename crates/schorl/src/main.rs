@@ -1,8 +1,9 @@
 //! schorl の入口。
 //!
-//! この phase では、機械が確かめられる五つの検査のうち何が済んでいるかを
-//! そのまま述べるだけにしてある。捕捉も注入も OpenXR も未配線なので、
-//! できていないことを緑と言わない (`verify.no_green_substitute`)。
+//! この phase では、機械が確かめられる五つの検査 (spec 0.2 の
+//! `verify.machine_scope`) のうち何が済んでいるかをそのまま述べるだけにしてある。
+//! compositor もクライアントへの配りも OpenXR も未配線なので、できていないことを
+//! 緑と言わない (`verify.no_green_substitute`)。
 //!
 //! 出す行は `pin code.log.required_fields` の四欄 JSON。終了コードは、
 //! 「ビルドが通ってここまで来た」以上のことを主張しない。

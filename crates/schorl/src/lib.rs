@@ -8,16 +8,20 @@
 //! 束ねているのは配線のためで、個々の trait は互いに独立している
 //! (`house.effect_boundary.no_god_capability`)。
 //!
-//! この phase で在るのは配線と純粋な変換だけ。捕捉・注入・OpenXR の実装は
-//! 後続 phase が [`schorl_capture::FrameSource`] / [`schorl_input::PointerSink`] /
-//! [`schorl_xr::XrRuntime`] を実装して差し込む。
+//! この phase で在るのは配線と純粋な変換だけ。入力の配りと OpenXR の実装は
+//! 後続 phase が [`schorl_input::PointerSink`] / [`schorl_xr::XrRuntime`] を
+//! 実装して差し込む。
+//!
+//! **spec 0.2 の原文3 で、この境界から捕捉 (`schorl-capture`) と
+//! ホスト出力の貸し借り (`schorl-display`) が外れた。** schorl 自身が compositor に
+//! なってクライアントを直接持つなら、他 compositor の画面を取る口も、ホストに
+//! 出力を作らせる口も要らない。両 crate は実測資産として workspace に残っており、
+//! 退役した loop は `schorl-panel-driver` に在る。v1 のバイナリはどちらも通らない。
 
-use schorl_capture::FrameSource;
 use schorl_core::error::Result;
 use schorl_core::id::{IdGen, IdempotencyKey, TraceId};
 use schorl_core::log::{Level, LogRecord, LogSink};
 use schorl_core::time::{Clock, UtcTimestamp};
-use schorl_display::{OutputId, OutputRequest, VirtualOutputProvider};
 use schorl_input::{KeyboardSink, PointerEvent, PointerEventKind, PointerSink};
 use schorl_panel::cursor::{CursorResolution, PointerHold, resolve_cursor, to_pixels};
 use schorl_panel::grab::{ControllerId, GrabState, begin_grab, panel_pose_while_held, release_grab};
@@ -39,13 +43,9 @@ pub struct Capabilities {
     pub ids: Box<dyn IdGen>,
     /// ログの行き先。
     pub log: Box<dyn LogSink>,
-    /// 仮想出力の貸し借り。
-    pub outputs: Box<dyn VirtualOutputProvider>,
-    /// 画面の捕捉。
-    pub frames: Box<dyn FrameSource>,
-    /// ポインタの注入。
+    /// ポインタをクライアントへ配る口。
     pub pointer: Box<dyn PointerSink>,
-    /// キー入力の注入。
+    /// キー入力をクライアントへ配る口。
     pub keyboard: Box<dyn KeyboardSink>,
     /// XR ランタイム。
     pub xr: Box<dyn XrRuntime>,
@@ -98,7 +98,7 @@ impl Schorl {
         &self.caps
     }
 
-    /// 可変で借りる。捕捉と注入は `&mut self` を要る。
+    /// 可変で借りる。入力を配る口は `&mut self` を要る。
     pub const fn capabilities_mut(&mut self) -> &mut Capabilities {
         &mut self.caps
     }
@@ -108,30 +108,18 @@ impl Schorl {
         SessionConfig::for_panel(self.panel)
     }
 
-    /// 板に合わせた仮想出力の注文 (`v1.panel_source`)。
-    pub fn output_request(&self, idempotency_key: IdempotencyKey) -> OutputRequest {
-        OutputRequest {
-            preferred_name: "SCHORL-PANEL".to_owned(),
-            width_px: self.panel.resolution().width_px,
-            height_px: self.panel.resolution().height_px,
-            refresh_millihz: 60_000,
-            idempotency_key,
-        }
-    }
-
     /// コントローラの位置を板平面へ落としてカーソルを決める
     /// (`ux.cursor_mapping` / `ux.cursor_beyond_edge`)。
     pub fn cursor(&self, controller_point: Vec3, hold: PointerHold) -> CursorResolution {
         resolve_cursor(&self.panel, controller_point, hold)
     }
 
-    /// カーソルの解決結果を、Linux へ戻すポインタ事象へ直す。
+    /// カーソルの解決結果を、クライアントへ配るポインタ事象へ直す。
     ///
     /// 板から外れて押してもいないときは何も作らない。作らないことが
     /// 「板の上でだけ動く」という形になる。
     pub fn pointer_motion(
         &self,
-        output: &OutputId,
         cursor: CursorResolution,
         idempotency_key: IdempotencyKey,
         at: UtcTimestamp,
@@ -142,7 +130,6 @@ impl Schorl {
             idempotency_key,
             at,
             kind: PointerEventKind::MotionAbsolute {
-                output: output.clone(),
                 x_px: pixels.x,
                 y_px: pixels.y,
             },
@@ -180,10 +167,8 @@ impl Schorl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schorl_capture::testing::SolidColourFrameSource;
     use schorl_core::id::IdScheme;
     use schorl_core::testing::{CapturingLogSink, FixedClock, SequentialIdGen};
-    use schorl_display::testing::{FakeOutputProvider, RecordingReleaser};
     use schorl_panel::math::Quat;
     use schorl_panel::panel::PanelPose;
     use schorl_scope::Background;
@@ -195,13 +180,6 @@ mod tests {
             clock: Box::new(FixedClock::at_millis(1_700_000_000_000)),
             ids: Box::new(SequentialIdGen::new(IdScheme::Ulid, "test")),
             log: Box::new(CapturingLogSink::new()),
-            outputs: Box::new(FakeOutputProvider::new(Arc::new(RecordingReleaser::new()))),
-            frames: Box::new(SolidColourFrameSource {
-                width_px: 4,
-                height_px: 2,
-                fill: 0,
-                captured_at: UtcTimestamp::from_millis_since_epoch(0),
-            }),
             pointer: Box::new(schorl_input::testing::RecordingSink::new()),
             keyboard: Box::new(schorl_input::testing::RecordingSink::new()),
             xr: Box::new(ScriptedRuntime::default()),
@@ -218,35 +196,18 @@ mod tests {
     }
 
     #[test]
-    fn the_output_request_matches_the_panel_resolution() {
-        let schorl = wired();
-        let key = IdempotencyKey::new(
-            schorl_core::id::Id::new(IdScheme::Ulid, "req-1").expect("valid text"),
-        );
-        let request = schorl.output_request(key);
-        assert_eq!(request.width_px, schorl.panel().resolution().width_px);
-        assert_eq!(request.height_px, schorl.panel().resolution().height_px);
-    }
-
-    #[test]
     fn a_cursor_over_the_panel_becomes_a_motion_event() {
         let schorl = wired();
         let centre = schorl.panel().pose().pose.position;
         let cursor = schorl.cursor(centre, PointerHold::Up);
-        let output = OutputId::new("SCHORL-PANEL").expect("valid name");
         let key = IdempotencyKey::new(
             schorl_core::id::Id::new(IdScheme::Ulid, "move-1").expect("valid text"),
         );
         let event = schorl
-            .pointer_motion(
-                &output,
-                cursor,
-                key,
-                UtcTimestamp::from_millis_since_epoch(1),
-            )
+            .pointer_motion(cursor, key, UtcTimestamp::from_millis_since_epoch(1))
             .expect("the cursor is on the panel");
         match event.kind {
-            PointerEventKind::MotionAbsolute { x_px, y_px, .. } => {
+            PointerEventKind::MotionAbsolute { x_px, y_px } => {
                 assert_eq!((x_px, y_px), (960, 540));
             }
             PointerEventKind::Button { .. } => unreachable!("built as motion"),
@@ -259,18 +220,12 @@ mod tests {
         let far = Vec3::new(9.0, 1.3, -1.5);
         let cursor = schorl.cursor(far, PointerHold::Up);
         assert_eq!(cursor, CursorResolution::OffPanel);
-        let output = OutputId::new("SCHORL-PANEL").expect("valid name");
         let key = IdempotencyKey::new(
             schorl_core::id::Id::new(IdScheme::Ulid, "move-2").expect("valid text"),
         );
         assert!(
             schorl
-                .pointer_motion(
-                    &output,
-                    cursor,
-                    key,
-                    UtcTimestamp::from_millis_since_epoch(1)
-                )
+                .pointer_motion(cursor, key, UtcTimestamp::from_millis_since_epoch(1))
                 .is_none()
         );
     }
@@ -312,13 +267,6 @@ mod tests {
             clock: Box::new(FixedClock::at_millis(7)),
             ids: Box::new(SequentialIdGen::new(IdScheme::Ulid, "trace")),
             log: Box::new(sink.clone()),
-            outputs: Box::new(FakeOutputProvider::new(Arc::new(RecordingReleaser::new()))),
-            frames: Box::new(SolidColourFrameSource {
-                width_px: 1,
-                height_px: 1,
-                fill: 0,
-                captured_at: UtcTimestamp::from_millis_since_epoch(0),
-            }),
             pointer: Box::new(schorl_input::testing::RecordingSink::new()),
             keyboard: Box::new(schorl_input::testing::RecordingSink::new()),
             xr: Box::new(ScriptedRuntime::default()),

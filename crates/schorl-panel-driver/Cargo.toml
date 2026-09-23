@@ -1,0 +1,19 @@
+[package]
+name = "schorl-panel-driver"
+description = "板一枚を capture して貼り、操作をホストへ戻す loop — spec 0.2 で v1 から外れた実測資産"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+schorl-core.workspace = true
+schorl-panel.workspace = true
+schorl-xr.workspace = true
+# この三つが v1 から外れた経路そのもの。だからこの crate は v1 のバイナリから外してある。
+schorl-capture.workspace = true
+schorl-display.workspace = true
+schorl-input.workspace = true
+
+[lints]
+workspace = true

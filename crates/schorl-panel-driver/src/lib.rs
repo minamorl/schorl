@@ -1,4 +1,17 @@
-//! 板一枚を回す driver。
+//! `schorl-panel-driver` — 板一枚を回す driver。**v1 の経路には無い。**
+//!
+//! spec 0.2 の原文3「360度あるならそれ用にウィンドウマネージャー作るだけでいいのでは？」で、
+//! 「他 compositor の画面を capture して板に貼り、決まった 2D 位置をホストへ注入し返す」
+//! というこの loop は v1 から外れた。schorl 自身が compositor になりクライアントを
+//! 直接持つなら、取り口も注入先も要らない。
+//!
+//! 消していないのは、[`schorl_capture`] と [`schorl_display`] を消していないのと
+//! 同じ理由 — 実測資産であり、既存 Hyprland の窓を VR から見る将来の口だから。
+//! `schorl-xr` から出したのは、v1 のバイナリがこの loop 経由で capture / display へ
+//! つながってしまわないようにするため。中身は `schorl-xr::driver` から一行も
+//! 書き換えずに運んであり、`use crate::` が `use schorl_xr::` になっただけ。
+//! workspace には残るので `cargo build --workspace` と `cargo test --workspace` は
+//! 引き続きここを通る。
 //!
 //! ここが「被っている側」と「Linux 側」の間の変換を全部持つ。持っているのは
 //! 変換と状態だけで、周囲効果は注入された capability の向こう側にある
@@ -40,9 +53,9 @@ use schorl_panel::grab::{ControllerId, GrabState, begin_grab, panel_pose_while_h
 use schorl_panel::math::Pose;
 use schorl_panel::panel::Panel;
 
-use crate::composition::CompositionPlan;
-use crate::sleep::Sleeper;
-use crate::{PressState, SessionConfig, SessionLoop, SessionState, XrEvent, XrSession};
+use schorl_xr::composition::CompositionPlan;
+use schorl_xr::sleep::Sleeper;
+use schorl_xr::{PressState, SessionConfig, SessionLoop, SessionState, XrEvent, XrSession};
 
 /// 手ごとの最後に見た姿勢。
 ///
@@ -352,8 +365,11 @@ impl<'a> PanelDriver<'a> {
             let motion = PointerEvent {
                 idempotency_key: self.next_key()?,
                 at: self.wiring.clock.now_utc(),
+                // 0.2 以前はここで貼り先の出力 (`self.output`) を名指ししていた。
+                // 原文3 でホストへ注入する経路が退役し、`PointerEventKind` から欄が
+                // 消えたので、運ぶのは板上の画素位置だけ。`self.output` は絵を取る側
+                // (`frames.capture`) でそのまま使われている。
                 kind: PointerEventKind::MotionAbsolute {
-                    output: self.output.clone(),
                     x_px: pixels.x,
                     y_px: pixels.y,
                 },
@@ -423,7 +439,7 @@ pub fn step_budget_exhausted(steps: usize) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::ScriptedSession;
+    use schorl_xr::testing::ScriptedSession;
     use schorl_capture::testing::SolidColourFrameSource;
     use schorl_core::id::IdScheme;
     use schorl_core::testing::{FixedClock, SequentialIdGen};
@@ -433,7 +449,7 @@ mod tests {
     use schorl_panel::math::{Quat, Vec3};
     use schorl_panel::panel::{PanelPose, PanelResolution, PanelSize};
 
-    use crate::sleep::testing::CountingSleeper;
+    use schorl_xr::sleep::testing::CountingSleeper;
 
     fn test_panel() -> Panel {
         Panel::single(
@@ -691,7 +707,7 @@ mod tests {
     }
 
     #[test]
-    fn the_motion_delivered_names_the_panel_output_and_its_pixels() {
+    fn the_motion_delivered_carries_the_panel_pixels() {
         let mut harness = Harness::new();
         {
             let mut driver = harness.driver();
@@ -707,8 +723,7 @@ mod tests {
         let events = harness.pointer.pointer_events();
         assert_eq!(events.len(), 1);
         match &events[0].kind {
-            PointerEventKind::MotionAbsolute { output, x_px, y_px } => {
-                assert_eq!(output.as_str(), "SCHORL-PANEL");
+            PointerEventKind::MotionAbsolute { x_px, y_px } => {
                 // 8x4 の板の中心。
                 assert_eq!((*x_px, *y_px), (4, 2));
             }

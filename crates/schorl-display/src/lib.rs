@@ -1,6 +1,13 @@
 //! `schorl-display` — 板の中身になる Linux 側の出力。
 //!
-//! 満たす pin:
+//! **spec 0.2 の原文3「360度あるならそれ用にウィンドウマネージャー作るだけでいいのでは？」
+//! でこの経路は v1 から外れた。消していないのは、これがこの repo で唯一の実測資産
+//! (実ホストで Hyprland の headless 出力を作って返せた証拠) であり、
+//! 既存 Hyprland の窓を VR から見る将来の口でもあるため。**
+//!
+//! 満たしていた pin (原文3 で判断3 ごと退役。ただし
+//! `host.no_persistent_config_change` と、資源を終了時に返すという不変条件
+//! (0.2 では `host.created_resource_lifecycle`) は手段非依存なので生きている):
 //! - `v1.panel_source: require schorl.v1.panel.content_source = linux_display` —
 //!   板の中身は [`OutputId`] が指す Linux の出力から来る。
 //! - `host.created_output_lifecycle: require schorl.created_virtual_output.lifetime

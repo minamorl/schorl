@@ -21,7 +21,7 @@
 //! [`schorl_verify`](../schorl_verify/index.html) の人間ゲートの仕事で、機械の緑で
 //! 代用しない (`verify.no_green_substitute`)。
 
-use schorl_capture::Frame;
+use schorl_core::frame::Frame;
 use schorl_core::error::{Error, ErrorCode, Result};
 use schorl_core::id::TraceId;
 use schorl_input::{ButtonState, Keycode};
@@ -31,12 +31,10 @@ use schorl_panel::panel::Panel;
 use schorl_scope::Background;
 
 pub mod composition;
-pub mod driver;
 pub mod openxr_runtime;
 pub mod sleep;
 
 pub use composition::{Backdrop, CompositionPlan, EnvironmentBlend, QuadLayer};
-pub use driver::{ControllerPoses, DriverConfig, PanelDriver, PanelWiring, StepOutcome};
 pub use openxr_runtime::{
     BoundSources, HeadlessConfig, HeadlessRuntime, HeadlessSession, ReferenceSpaceChoice,
     RuntimeFacts,
@@ -190,7 +188,8 @@ pub trait XrRuntime: Send + Sync {
 
 /// 開いたセッションを回しきる口。
 ///
-/// 実体は [`driver::PanelDriver`]。
+/// 実体は `schorl-panel-driver` の `PanelDriver` だった。spec 0.2 の原文3 で
+/// あの loop が v1 から外れたので、いま v1 の実装はこの trait に無い。
 pub trait SessionLoop {
     /// 開いたセッションを回しきる。
     fn run(&mut self, session: &mut dyn XrSession) -> Result<()>;
@@ -298,7 +297,7 @@ pub mod testing {
 mod tests {
     use super::testing::ScriptedRuntime;
     use super::*;
-    use schorl_capture::{FrameOrigin, PixelFormat};
+    use schorl_core::frame::{FrameOrigin, PixelFormat};
     use schorl_core::time::UtcTimestamp;
 
     #[test]

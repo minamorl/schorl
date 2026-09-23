@@ -1,6 +1,9 @@
 # schorl workspace — Linux 向け VR 作業環境 schorl の第一版の骨格。
 #
-# 由来: pins/domains/schorl.spec@0.1 (import house_style@4.0 -> prohibitions@1.0)。
+# 由来: pins/domains/schorl.spec@0.2 (import house_style@4.0 -> prohibitions@1.0)。
+# 0.2 の原文3 で v1 から外れた経路 (crates/schorl-capture, crates/schorl-display,
+# crates/schorl-panel-driver) は member に残してあるが、crate schorl はどれにも
+# 依存しない。残す理由は実測資産だから。
 # この manifest が満たす pin:
 #   release.no_publication  — workspace.package.publish = false (crates.io へは出さない)
 #   release.local_git_only  — remote を足さない。ここには何も書けないので運用側の掟。
@@ -19,6 +22,7 @@ members = [
     "crates/schorl-capture",
     "crates/schorl-input",
     "crates/schorl-xr",
+    "crates/schorl-panel-driver",
     "crates/schorl-verify",
     "crates/schorl",
 ]
@@ -41,4 +45,5 @@ schorl-display = { path = "crates/schorl-display" }
 schorl-capture = { path = "crates/schorl-capture" }
 schorl-input = { path = "crates/schorl-input" }
 schorl-xr = { path = "crates/schorl-xr" }
+schorl-panel-driver = { path = "crates/schorl-panel-driver" }
 schorl-verify = { path = "crates/schorl-verify" }

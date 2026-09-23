@@ -1,25 +1,28 @@
-//! `schorl-input` — 板の上の操作を Linux へ戻す。
+//! `schorl-input` — ウィンドウの上の操作を、そのウィンドウのクライアントへ届ける。
 //!
-//! 満たす pin:
-//! - `v1.cursor_moves: require schorl.v1.cursor.on_panel = moves` —
-//!   [`PointerEventKind::MotionAbsolute`] が板の画素位置をそのまま運ぶ。
-//! - `v1.click_delivered: require schorl.v1.click = delivered_to_linux` —
+//! 満たす pin (spec 0.2 の語):
+//! - `v1.cursor_moves: require schorl.v1.cursor.on_window = moves` —
+//!   [`PointerEventKind::MotionAbsolute`] がウィンドウの画素位置をそのまま運ぶ。
+//! - `v1.click_delivered: require schorl.v1.click = delivered_to_window_client` —
 //!   [`PointerSink`] が届けた結果を [`Delivery`] で返す。
-//! - `v1.key_delivered: require schorl.v1.key_input = delivered_to_linux` —
+//! - `v1.key_delivered: require schorl.v1.key_input = delivered_to_window_client` —
 //!   [`KeyboardSink`] も同じ形。
+//! - `wm.input_ownership: require schorl.input.seat = owned_by_schorl` —
+//!   宛先は schorl 自身のクライアントなので、ホストの出力を名指しする欄は持たない。
 //! - `code.idempotency.write: require write.idempotency = required` —
 //!   どの事象も [`IdempotencyKey`] を持ち、同じ鍵の再送は
 //!   [`Delivery::DuplicateIgnored`] になる。二重クリックが起きない。
 //! - `house.effect_boundary.no_god_capability` — ポインタとキーボードは別の trait。
 //!
-//! どの protocol で戻すか (`free schorl.input.pointer_protocol` /
-//! `free schorl.input.keyboard_protocol`) はここでは決めない。
-//! **実装はこの phase では書かない。** 穴は trait の署名として残す。
+//! どう届けるか (`free schorl.compositor.shell_protocols` / `free schorl.window.focus_policy`)
+//! はここでは決めない。**実装はこの phase では書かない。** 穴は trait の署名として残す。
+//! 0.2 以前にあった `free schorl.input.pointer_protocol` /
+//! `free schorl.input.keyboard_protocol` (ホストへ注入する protocol の選択) は、
+//! 原文3 でその経路ごと退役した。
 
 use schorl_core::error::Result;
 use schorl_core::id::IdempotencyKey;
 use schorl_core::time::UtcTimestamp;
-use schorl_display::OutputId;
 
 /// 届けた結果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -57,12 +60,13 @@ pub struct Keycode(pub u32);
 /// ポインタに起きたこと。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PointerEventKind {
-    /// 出力上の絶対位置へ動かす。
+    /// ウィンドウ上の絶対位置へ動かす。
     ///
-    /// 出力を名指しするので、板の画素座標からホスト全体の座標へ換算しなくてよい。
+    /// 座標は宛先ウィンドウの表面ローカル。schorl が seat を持つので、ホストの
+    /// 出力を名指しして換算する必要が無い (`wm.input_ownership`)。0.2 以前は
+    /// ここに `output: schorl_display::OutputId` があった — 注入経路の語彙であり、
+    /// 原文3 で退役した。
     MotionAbsolute {
-        /// 動かす先の出力。
-        output: OutputId,
         /// 左からの画素。
         x_px: i32,
         /// 上からの画素。
@@ -77,7 +81,7 @@ pub enum PointerEventKind {
     },
 }
 
-/// Linux へ戻すポインタ事象。
+/// クライアントへ届けるポインタ事象。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PointerEvent {
     /// 重複を防ぐ鍵。
@@ -88,7 +92,7 @@ pub struct PointerEvent {
     pub kind: PointerEventKind,
 }
 
-/// Linux へ戻すキー事象。
+/// クライアントへ届けるキー事象。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyEvent {
     /// 重複を防ぐ鍵。
@@ -101,7 +105,7 @@ pub struct KeyEvent {
     pub state: ButtonState,
 }
 
-/// ポインタを Linux へ戻す capability。
+/// ポインタをクライアントへ届ける capability。
 ///
 /// **実装は後続 phase。**
 pub trait PointerSink: Send {
@@ -109,7 +113,7 @@ pub trait PointerSink: Send {
     fn deliver(&mut self, event: &PointerEvent) -> Result<Delivery>;
 }
 
-/// キー入力を Linux へ戻す capability。
+/// キー入力をクライアントへ届ける capability。
 ///
 /// **実装は後続 phase。**
 pub trait KeyboardSink: Send {
@@ -195,7 +199,6 @@ mod tests {
             idempotency_key: key(k),
             at: at(1),
             kind: PointerEventKind::MotionAbsolute {
-                output: OutputId::new("SCHORL-1").expect("valid name"),
                 x_px: 960,
                 y_px: 540,
             },
@@ -252,12 +255,14 @@ mod tests {
         assert_eq!(sink.pointer_events().len(), 1);
     }
 
+    /// 0.2 以前はここで `output` 欄が "SCHORL-1" を名指ししていることを見ていた。
+    /// 原文3 でホスト出力を名指しする経路が退役し、欄ごと消えたので、残った不変条件
+    /// (ウィンドウ表面ローカルの画素位置をそのまま運ぶこと) だけを見る。
     #[test]
-    fn motion_names_the_output_it_targets() {
+    fn motion_carries_the_surface_local_pixel_position() {
         let event = motion("motion-2");
         match event.kind {
-            PointerEventKind::MotionAbsolute { output, x_px, y_px } => {
-                assert_eq!(output.as_str(), "SCHORL-1");
+            PointerEventKind::MotionAbsolute { x_px, y_px } => {
                 assert_eq!((x_px, y_px), (960, 540));
             }
             PointerEventKind::Button { .. } => unreachable!("constructed as motion"),

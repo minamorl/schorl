@@ -4,7 +4,8 @@
 //! - `v1.panel_source: require schorl.v1.panel.content_source = linux_display` —
 //!   [`OutputId`] の綴りを `wl_output` version 4 の `name` イベントと突き合わせて
 //!   その出力だけを取る。
-//! - `verify.machine_scope` の `capture_returns_real_frame` — ここから返る
+//! - 0.1 の `verify.machine_scope` の `capture_returns_real_frame` (0.2 で
+//!   `client_frame_reaches_swapchain` へ改鍵され、この経路は v1 から外れた) — ここから返る
 //!   [`Frame`] は [`FrameOrigin::RealCapture`] を名乗る。名乗れるのは compositor が
 //!   `ready` を送った経路だけで、`failed` も時間切れも封筒になる。
 //! - `code.time.tz: require time.storage = utc` — `ready` が運ぶ時刻は

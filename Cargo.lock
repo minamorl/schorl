@@ -144,9 +144,7 @@ dependencies = [
 name = "schorl"
 version = "0.1.0"
 dependencies = [
- "schorl-capture",
  "schorl-core",
- "schorl-display",
  "schorl-input",
  "schorl-panel",
  "schorl-scope",
@@ -182,7 +180,6 @@ name = "schorl-input"
 version = "0.1.0"
 dependencies = [
  "schorl-core",
- "schorl-display",
 ]
 
 [[package]]
@@ -191,6 +188,18 @@ version = "0.1.0"
 dependencies = [
  "schorl-core",
  "schorl-scope",
+]
+
+[[package]]
+name = "schorl-panel-driver"
+version = "0.1.0"
+dependencies = [
+ "schorl-capture",
+ "schorl-core",
+ "schorl-display",
+ "schorl-input",
+ "schorl-panel",
+ "schorl-xr",
 ]
 
 [[package]]
@@ -213,9 +222,7 @@ name = "schorl-xr"
 version = "0.1.0"
 dependencies = [
  "openxr",
- "schorl-capture",
  "schorl-core",
- "schorl-display",
  "schorl-input",
  "schorl-panel",
  "schorl-scope",

@@ -2,8 +2,13 @@
 //!
 //! 満たす pin:
 //! - `verify.machine_scope: require schorl.machine_verifiable = { build_passes,
-//!   openxr_session_opens, capture_returns_real_frame, input_injection_delivered,
-//!   unit_tests }` → [`MachineCheck`] はこの五つだけを枝に持つ。
+//!   openxr_session_opens, client_frame_reaches_swapchain,
+//!   input_event_delivered_to_client, unit_tests }` (spec 0.2) →
+//!   [`MachineCheck`] はこの五つだけを枝に持つ。0.1 の
+//!   `capture_returns_real_frame` / `input_injection_delivered` は、原文3 で
+//!   capture 経路と注入経路が消えたため、同じ不変条件 (画素が実際に届く /
+//!   入力が実際に届く) を経路非依存の語へ改鍵したもの。項目数は 5 のままで、
+//!   spec に無い check をここで発明していない。
 //! - `verify.hmd_gate: require schorl.hmd_acceptance = human_wearing_quest_3` →
 //!   [`accept_by_human`] は Quest 3 を被った人の証言でしか通らない。
 //! - `verify.no_green_substitute: forbid schorl.machine_green =
@@ -24,10 +29,10 @@ pub enum MachineCheck {
     BuildPasses,
     /// OpenXR ランタイムに対してセッションが開けること。
     OpenxrSessionOpens,
-    /// 捕捉が実フレームを返すこと。
-    CaptureReturnsRealFrame,
-    /// 入力注入が届くこと。
-    InputInjectionDelivered,
+    /// クライアントの一枚が swapchain まで届くこと。
+    ClientFrameReachesSwapchain,
+    /// 入力事象がクライアントまで届くこと。
+    InputEventDeliveredToClient,
     /// 単体試験。
     UnitTests,
 }
@@ -37,8 +42,8 @@ impl MachineCheck {
     pub const ALL: [MachineCheck; 5] = [
         MachineCheck::BuildPasses,
         MachineCheck::OpenxrSessionOpens,
-        MachineCheck::CaptureReturnsRealFrame,
-        MachineCheck::InputInjectionDelivered,
+        MachineCheck::ClientFrameReachesSwapchain,
+        MachineCheck::InputEventDeliveredToClient,
         MachineCheck::UnitTests,
     ];
 
@@ -47,8 +52,8 @@ impl MachineCheck {
         match self {
             MachineCheck::BuildPasses => "build_passes",
             MachineCheck::OpenxrSessionOpens => "openxr_session_opens",
-            MachineCheck::CaptureReturnsRealFrame => "capture_returns_real_frame",
-            MachineCheck::InputInjectionDelivered => "input_injection_delivered",
+            MachineCheck::ClientFrameReachesSwapchain => "client_frame_reaches_swapchain",
+            MachineCheck::InputEventDeliveredToClient => "input_event_delivered_to_client",
             MachineCheck::UnitTests => "unit_tests",
         }
     }
@@ -94,8 +99,8 @@ impl MachineRun {
         match check {
             MachineCheck::BuildPasses => 0,
             MachineCheck::OpenxrSessionOpens => 1,
-            MachineCheck::CaptureReturnsRealFrame => 2,
-            MachineCheck::InputInjectionDelivered => 3,
+            MachineCheck::ClientFrameReachesSwapchain => 2,
+            MachineCheck::InputEventDeliveredToClient => 3,
             MachineCheck::UnitTests => 4,
         }
     }
@@ -198,8 +203,8 @@ mod tests {
                                 MachineRun::new()
                                     .record(MachineCheck::BuildPasses, a)
                                     .record(MachineCheck::OpenxrSessionOpens, b)
-                                    .record(MachineCheck::CaptureReturnsRealFrame, c)
-                                    .record(MachineCheck::InputInjectionDelivered, d)
+                                    .record(MachineCheck::ClientFrameReachesSwapchain, c)
+                                    .record(MachineCheck::InputEventDeliveredToClient, d)
                                     .record(MachineCheck::UnitTests, e),
                             );
                         }
@@ -242,8 +247,8 @@ mod tests {
             [
                 "build_passes",
                 "openxr_session_opens",
-                "capture_returns_real_frame",
-                "input_injection_delivered",
+                "client_frame_reaches_swapchain",
+                "input_event_delivered_to_client",
                 "unit_tests",
             ]
         );

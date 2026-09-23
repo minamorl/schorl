@@ -38,7 +38,7 @@ use openxr::{
     ExtensionSet, FormFactor, Headless, Instance, Path, Posef, ReferenceSpaceType, Space,
     SpaceLocationFlags, Version, ViewConfigurationType,
 };
-use schorl_capture::Frame;
+use schorl_core::frame::Frame;
 use schorl_core::error::{Error, ErrorCode, Result};
 use schorl_core::id::TraceId;
 use schorl_panel::grab::ControllerId;

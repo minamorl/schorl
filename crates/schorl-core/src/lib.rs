@@ -18,6 +18,7 @@
 //! 神 capability は作らない。組み立ては境界 (`schorl` bin) で行う。
 
 pub mod error;
+pub mod frame;
 pub mod id;
 pub mod json;
 pub mod log;
