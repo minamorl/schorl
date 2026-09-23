@@ -196,15 +196,15 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for CaptureState {
                 }
             },
             zwlr_screencopy_frame_v1::Event::BufferDone => state.pending.buffer_done = true,
-            zwlr_screencopy_frame_v1::Event::Flags { flags } => {
-                if let WEnum::Value(flags) = flags {
-                    state.pending.y_invert =
-                        flags.contains(zwlr_screencopy_frame_v1::Flags::YInvert);
-                }
+            zwlr_screencopy_frame_v1::Event::Flags {
+                flags: WEnum::Value(flags),
+            } => {
+                state.pending.y_invert = flags.contains(zwlr_screencopy_frame_v1::Flags::YInvert);
             }
             zwlr_screencopy_frame_v1::Event::Ready { .. } => state.pending.ready = true,
             zwlr_screencopy_frame_v1::Event::Failed => state.pending.failed = true,
-            // `linux_dmabuf` と `damage` はこの経路では使わない。
+            // `linux_dmabuf` と `damage` はこの経路では使わない。知らない綴りの
+            // `flags` もここへ落ちる。**落ちたときに何もしないのは前と同じである。**
             _ => {}
         }
     }

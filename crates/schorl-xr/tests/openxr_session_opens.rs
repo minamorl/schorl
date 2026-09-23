@@ -16,10 +16,12 @@
 use std::sync::{Mutex, MutexGuard};
 
 use schorl_panel::panel::Panel;
-use schorl_verify::{CheckOutcome, HmdAcceptance, MachineCheck, MachineRun, hmd_acceptance_from_machine};
+use schorl_scope::Background;
+use schorl_verify::{
+    CheckOutcome, HmdAcceptance, MachineCheck, MachineRun, hmd_acceptance_from_machine,
+};
 use schorl_xr::openxr_runtime::{HeadlessConfig, HeadlessRuntime, ReferenceSpaceChoice};
 use schorl_xr::{SessionConfig, SessionKind, XrSession};
-use schorl_scope::Background;
 
 /// 一つのプロセスで `XrInstance` を同時に二つ持てない。実測でローダがそう言う:
 /// 「Error [GENERAL | xrCreateInstance | OpenXR-Loader] : Loader does not support
@@ -28,7 +30,9 @@ static RUNTIME_LOCK: Mutex<()> = Mutex::new(());
 
 fn hold_the_runtime() -> MutexGuard<'static, ()> {
     // 前の試験が落ちて毒が付いていても、直列化の目的は果たせる。
-    RUNTIME_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    RUNTIME_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[test]
@@ -55,7 +59,10 @@ fn a_headless_session_opens_against_the_active_runtime() {
         "timespec_time_advertised = {}",
         facts.timespec_time_advertised
     );
-    println!("reference_space          = {}", facts.reference_space.as_str());
+    println!(
+        "reference_space          = {}",
+        facts.reference_space.as_str()
+    );
     println!("bound_profiles           = {:?}", facts.bound_profiles);
     println!("states_before_begin      = {:?}", facts.observed_states);
 
@@ -72,10 +79,7 @@ fn a_headless_session_opens_against_the_active_runtime() {
         "the panel must live in a world-locked space"
     );
     assert!(
-        facts
-            .observed_states
-            .iter()
-            .any(|state| state == "ready"),
+        facts.observed_states.iter().any(|state| state == "ready"),
         "the session must have reached READY: {:?}",
         facts.observed_states
     );
@@ -101,7 +105,9 @@ fn a_headless_session_opens_against_the_active_runtime() {
     // 束縛の提案が通ったことと、入力源が本当に束ねられたことは別。数える。
     // **セッションが走り出してから聞かないと空が返る** (実測: open 直後に聞くと
     // 両手とも空だった。interaction profile が有効になるのは begin のあと)。
-    let bound = session.bound_sources().expect("bound sources can be listed");
+    let bound = session
+        .bound_sources()
+        .expect("bound sources can be listed");
     println!("bound grab  = {:?}", bound.grab);
     println!("bound click = {:?}", bound.click);
     println!("bound aim   = {:?}", bound.aim);

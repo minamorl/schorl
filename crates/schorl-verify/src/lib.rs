@@ -125,9 +125,7 @@ impl MachineRun {
 
     /// 検査と結果の並び。
     pub fn entries(&self) -> impl Iterator<Item = (MachineCheck, CheckOutcome)> + '_ {
-        MachineCheck::ALL
-            .into_iter()
-            .map(|c| (c, self.outcome(c)))
+        MachineCheck::ALL.into_iter().map(|c| (c, self.outcome(c)))
     }
 }
 
@@ -190,7 +188,8 @@ pub fn accept_by_human(witness: &HumanWitness) -> Result<HmdAcceptance> {
 mod tests {
     use super::*;
 
-    const OUTCOMES: [CheckOutcome; 3] = [CheckOutcome::NotRun, CheckOutcome::Red, CheckOutcome::Green];
+    const OUTCOMES: [CheckOutcome; 3] =
+        [CheckOutcome::NotRun, CheckOutcome::Red, CheckOutcome::Green];
 
     fn all_runs() -> Vec<MachineRun> {
         let mut runs = Vec::new();

@@ -49,7 +49,9 @@ use schorl_input::{
     PointerSink,
 };
 use schorl_panel::cursor::{CursorResolution, PointerHold, resolve_cursor, to_pixels};
-use schorl_panel::grab::{ControllerId, GrabState, begin_grab, panel_pose_while_held, release_grab};
+use schorl_panel::grab::{
+    ControllerId, GrabState, begin_grab, panel_pose_while_held, release_grab,
+};
 use schorl_panel::math::Pose;
 use schorl_panel::panel::Panel;
 
@@ -299,10 +301,10 @@ impl<'a> PanelDriver<'a> {
                 }
                 XrEvent::ControllerPose { controller, pose } => {
                     self.poses.set(controller, pose);
-                    if self.grab.controller() == Some(controller) {
-                        if let Some(panel_pose) = panel_pose_while_held(self.grab, pose) {
-                            self.panel = self.panel.with_pose(panel_pose);
-                        }
+                    if self.grab.controller() == Some(controller)
+                        && let Some(panel_pose) = panel_pose_while_held(self.grab, pose)
+                    {
+                        self.panel = self.panel.with_pose(panel_pose);
                     }
                 }
                 XrEvent::GrabButton { controller, state } => match state {
@@ -439,7 +441,6 @@ pub fn step_budget_exhausted(steps: usize) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schorl_xr::testing::ScriptedSession;
     use schorl_capture::testing::SolidColourFrameSource;
     use schorl_core::id::IdScheme;
     use schorl_core::testing::{FixedClock, SequentialIdGen};
@@ -448,6 +449,7 @@ mod tests {
     use schorl_input::testing::RecordingSink;
     use schorl_panel::math::{Quat, Vec3};
     use schorl_panel::panel::{PanelPose, PanelResolution, PanelSize};
+    use schorl_xr::testing::ScriptedSession;
 
     use schorl_xr::sleep::testing::CountingSleeper;
 

@@ -13,17 +13,17 @@
 
 use std::sync::{Arc, Mutex};
 
-use schorl_core::error::Result;
 use crate::window::WindowId;
+use schorl_core::error::Result;
 
+/// dmabuf の寸法と format を読むための trait。
+pub use smithay::backend::allocator::Buffer as DmabufDimensions;
 /// smithay が組み立てたクライアントの dmabuf。
 ///
 /// [`ClientTextureImporter`] を実装する面はこの crate の外に居る (GPU へ取り込む
 /// のは別の面の仕事である)。その面が smithay を直に依存せずに署名を書けるよう、
 /// 受け取る型をここから出しておく。
 pub use smithay::backend::allocator::dmabuf::Dmabuf;
-/// dmabuf の寸法と format を読むための trait。
-pub use smithay::backend::allocator::Buffer as DmabufDimensions;
 
 /// クライアントが出してきたバッファの種別。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

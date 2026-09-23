@@ -162,11 +162,7 @@ fn report(sink: &dyn LogSink, clock: &dyn Clock, run: &MachineRun) {
             sink,
             clock,
             level,
-            &format!(
-                "machine check {} is {}",
-                check.as_str(),
-                outcome.as_str()
-            ),
+            &format!("machine check {} is {}", check.as_str(), outcome.as_str()),
         );
     }
     let msg = match hmd_acceptance_from_machine(run) {

@@ -21,8 +21,8 @@
 //! [`schorl_verify`](../schorl_verify/index.html) の人間ゲートの仕事で、機械の緑で
 //! 代用しない (`verify.no_green_substitute`)。
 
-use schorl_core::frame::Frame;
 use schorl_core::error::{Error, ErrorCode, Result};
+use schorl_core::frame::Frame;
 use schorl_core::id::TraceId;
 use schorl_input::{ButtonState, Keycode};
 use schorl_panel::grab::ControllerId;
@@ -253,10 +253,10 @@ pub mod testing {
             }
             self.polls = self.polls.saturating_add(1);
             let mut events = std::mem::take(&mut self.scripted_events);
-            if let Some(limit) = self.stop_after_polls {
-                if self.polls >= limit {
-                    events.push(XrEvent::StateChanged(SessionState::Stopping));
-                }
+            if let Some(limit) = self.stop_after_polls
+                && self.polls >= limit
+            {
+                events.push(XrEvent::StateChanged(SessionState::Stopping));
             }
             Ok(events)
         }

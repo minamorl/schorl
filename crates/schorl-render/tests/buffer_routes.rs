@@ -337,13 +337,8 @@ fn an_exportable_image_refuses_a_layout_the_device_does_not_offer() {
         }
         // vendor 0xfe は `drm_fourcc.h` のどの vendor でもない。
         let nonsense = DrmModifier::from_u64(0xfe00_0000_0000_0001);
-        let refused = ExportableImage::create(
-            context,
-            WIDTH,
-            HEIGHT,
-            DrmFormat::XRGB8888,
-            &[nonsense],
-        );
+        let refused =
+            ExportableImage::create(context, WIDTH, HEIGHT, DrmFormat::XRGB8888, &[nonsense]);
         match refused {
             Ok(_) => panic!("a layout this device never advertised was accepted"),
             Err(e) => assert_eq!(e.code(), ErrorCode::Unsupported),

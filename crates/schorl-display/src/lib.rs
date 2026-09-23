@@ -254,7 +254,9 @@ pub mod testing {
         }
 
         fn declared_host_ops(&self) -> Vec<HostOp> {
-            vec![HostOp::runtime("create a headless output for the lifetime of the process")]
+            vec![HostOp::runtime(
+                "create a headless output for the lifetime of the process",
+            )]
         }
     }
 }
@@ -284,7 +286,10 @@ mod tests {
         {
             let output = provider.create(&request("SCHORL-1")).expect("created");
             assert_eq!(output.id().as_str(), "SCHORL-1");
-            assert!(releaser.released().is_empty(), "still held inside the scope");
+            assert!(
+                releaser.released().is_empty(),
+                "still held inside the scope"
+            );
         }
         assert_eq!(releaser.released(), vec!["SCHORL-1".to_owned()]);
     }

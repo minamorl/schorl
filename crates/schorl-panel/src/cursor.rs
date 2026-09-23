@@ -231,7 +231,10 @@ mod tests {
         // 向きを変えても引数に向きが入らないので、答えは動かない。
         let second = project_onto_panel_plane(&panel, hand);
         assert_eq!(first, second);
-        assert!(close(first.u_m, -0.2) && close(first.v_m, 0.15), "{first:?}");
+        assert!(
+            close(first.u_m, -0.2) && close(first.v_m, 0.15),
+            "{first:?}"
+        );
     }
 
     #[test]

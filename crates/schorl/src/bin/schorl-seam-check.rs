@@ -59,8 +59,8 @@ use schorl_core::json::JsonValue;
 use schorl_core::log::{Level, LogRecord, LogSink};
 use schorl_core::time::{Clock, SystemClock};
 use schorl_panel::grab::ControllerId;
-use schorl_render::facts::TextureRoute;
 use schorl_panel::math::{Pose, Quat, Vec3};
+use schorl_render::facts::TextureRoute;
 use schorl_xr::{PressState, ThreadSleeper, XrEvent};
 
 /// shm でバッファを出すクライアント。
@@ -196,11 +196,9 @@ fn run(sink: Arc<StdoutJsonLogSink>, clock: &dyn Clock) -> Result<()> {
         ),
     );
 
-    let mapped = session.pump_until(
-        Duration::from_secs(25),
-        Duration::from_millis(2),
-        |s| !s.stage().is_empty(),
-    )?;
+    let mapped = session.pump_until(Duration::from_secs(25), Duration::from_millis(2), |s| {
+        !s.stage().is_empty()
+    })?;
     if !mapped {
         stop(&mut child);
         session.close()?;
@@ -438,11 +436,9 @@ fn run(sink: Arc<StdoutJsonLogSink>, clock: &dyn Clock) -> Result<()> {
     // shm のクライアントを先に降ろす。二枚同時に立つと、view 全体を数える
     // 照合器がどちらの並びを読んだのか言えなくなる。
     stop(&mut child);
-    let cleared = session.pump_until(
-        Duration::from_secs(15),
-        Duration::from_millis(2),
-        |s| s.stage().is_empty(),
-    )?;
+    let cleared = session.pump_until(Duration::from_secs(15), Duration::from_millis(2), |s| {
+        s.stage().is_empty()
+    })?;
     if !cleared {
         session.close()?;
         return Err(Error::new(
@@ -507,11 +503,10 @@ fn run(sink: Arc<StdoutJsonLogSink>, clock: &dyn Clock) -> Result<()> {
         ),
     );
 
-    let dmabuf_mapped = session.pump_until(
-        Duration::from_secs(30),
-        Duration::from_millis(2),
-        |s| !s.stage().is_empty(),
-    )?;
+    let dmabuf_mapped =
+        session.pump_until(Duration::from_secs(30), Duration::from_millis(2), |s| {
+            !s.stage().is_empty()
+        })?;
     if !dmabuf_mapped {
         stop(&mut dmabuf_child);
         session.close()?;
@@ -688,10 +683,7 @@ fn run(sink: Arc<StdoutJsonLogSink>, clock: &dyn Clock) -> Result<()> {
                     "real_controller_grab_presses".into(),
                     JsonValue::Int(real_grab_changes as i64)
                 ),
-                (
-                    "synthetic_controller_events".into(),
-                    JsonValue::Bool(true)
-                ),
+                ("synthetic_controller_events".into(), JsonValue::Bool(true)),
                 (
                     "note".into(),
                     JsonValue::text(
@@ -725,7 +717,11 @@ impl GrabMeasurement {
             ("window".into(), JsonValue::text(self.window.clone())),
             (
                 "before_mm".into(),
-                JsonValue::Array(vec![mm(self.before.x), mm(self.before.y), mm(self.before.z)]),
+                JsonValue::Array(vec![
+                    mm(self.before.x),
+                    mm(self.before.y),
+                    mm(self.before.z),
+                ]),
             ),
             (
                 "after_mm".into(),

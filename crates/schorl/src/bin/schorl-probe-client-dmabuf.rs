@@ -154,7 +154,8 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for Client {
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             surface.ack_configure(serial);
-            if let (false, Some(wl), Some(buffer)) = (state.committed, &state.surface, &state.buffer)
+            if let (false, Some(wl), Some(buffer)) =
+                (state.committed, &state.surface, &state.buffer)
             {
                 wl.attach(Some(buffer), 0, 0);
                 wl.damage(0, 0, WIDTH, HEIGHT);
@@ -199,8 +200,13 @@ fn run() -> Result<(), String> {
         None => choose_pattern(),
     };
     // **描く前に申告する。** あとから言い換えられないことがこの一行の意味である。
-    println!("schorl-probe-client-dmabuf pattern={}", pattern.to_letters());
-    std::io::stdout().flush().map_err(|e| format!("flush: {e}"))?;
+    println!(
+        "schorl-probe-client-dmabuf pattern={}",
+        pattern.to_letters()
+    );
+    std::io::stdout()
+        .flush()
+        .map_err(|e| format!("flush: {e}"))?;
 
     let display =
         std::env::var("WAYLAND_DISPLAY").map_err(|_| "WAYLAND_DISPLAY is not set".to_owned())?;
@@ -284,7 +290,9 @@ fn run() -> Result<(), String> {
         &[DrmModifier::LINEAR],
     )
     .map_err(|e| envelope(&e))?;
-    exportable.fill(&context, &frame).map_err(|e| envelope(&e))?;
+    exportable
+        .fill(&context, &frame)
+        .map_err(|e| envelope(&e))?;
     // 提出する前に GPU の書き込みを終わらせる。**先に渡して後から描かない。**
     context.wait_idle().map_err(|e| envelope(&e))?;
     let exported = exportable.export(&context).map_err(|e| envelope(&e))?;

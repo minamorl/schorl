@@ -280,10 +280,10 @@ impl SchorlSession {
 
         let placements = self.placements();
         // 消えたウィンドウを掴んだままにしない。
-        if let Some(held) = self.grabs.held_window().cloned() {
-            if !placements.iter().any(|p| p.id == held) {
-                self.grabs.forget(&held);
-            }
+        if let Some(held) = self.grabs.held_window().cloned()
+            && !placements.iter().any(|p| p.id == held)
+        {
+            self.grabs.forget(&held);
         }
         outcome.stage = self
             .stage
@@ -314,10 +314,10 @@ impl SchorlSession {
     ) -> Result<()> {
         let placements = self.placements();
         if let Some(effect) = self.grabs.on_event(event, &placements) {
-            if let GrabEffect::Moved { window, pose } = &effect {
-                if let Some(tracked) = self.compositor.state_mut().windows_mut().get_mut(window) {
-                    tracked.set_plane_pose(*pose);
-                }
+            if let GrabEffect::Moved { window, pose } = &effect
+                && let Some(tracked) = self.compositor.state_mut().windows_mut().get_mut(window)
+            {
+                tracked.set_plane_pose(*pose);
             }
             outcome.grabs.push(effect);
         }

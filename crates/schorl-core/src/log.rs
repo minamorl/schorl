@@ -82,7 +82,10 @@ impl LogRecord {
     /// JSON 表現。欄と順序はここで固定する。
     pub fn to_json(&self) -> JsonValue {
         JsonValue::Object(vec![
-            ("ts".to_owned(), JsonValue::Int(self.ts.millis_since_epoch())),
+            (
+                "ts".to_owned(),
+                JsonValue::Int(self.ts.millis_since_epoch()),
+            ),
             ("level".to_owned(), JsonValue::text(self.level.as_str())),
             (
                 "trace_id".to_owned(),

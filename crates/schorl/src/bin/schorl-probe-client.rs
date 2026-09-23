@@ -82,7 +82,8 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for Client {
     ) {
         if let xdg_surface::Event::Configure { serial } = event {
             surface.ack_configure(serial);
-            if let (false, Some(wl), Some(buffer)) = (state.committed, &state.surface, &state.buffer)
+            if let (false, Some(wl), Some(buffer)) =
+                (state.committed, &state.surface, &state.buffer)
             {
                 wl.attach(Some(buffer), 0, 0);
                 wl.damage(0, 0, WIDTH, HEIGHT);
@@ -130,10 +131,12 @@ fn run() -> Result<(), String> {
     };
     // **描く前に申告する。** あとから言い換えられないことがこの一行の意味である。
     println!("schorl-probe-client pattern={}", pattern.to_letters());
-    std::io::stdout().flush().map_err(|e| format!("flush: {e}"))?;
+    std::io::stdout()
+        .flush()
+        .map_err(|e| format!("flush: {e}"))?;
 
-    let display = std::env::var("WAYLAND_DISPLAY")
-        .map_err(|_| "WAYLAND_DISPLAY is not set".to_owned())?;
+    let display =
+        std::env::var("WAYLAND_DISPLAY").map_err(|_| "WAYLAND_DISPLAY is not set".to_owned())?;
     let runtime =
         std::env::var("XDG_RUNTIME_DIR").map_err(|_| "XDG_RUNTIME_DIR is not set".to_owned())?;
     let socket = std::path::Path::new(&runtime).join(&display);
@@ -162,15 +165,7 @@ fn run() -> Result<(), String> {
     }
     let file = scratch_file(&pixels, &socket)?;
     let pool = shm.create_pool(std::os::fd::AsFd::as_fd(&file), size as i32, &qh, ());
-    let buffer = pool.create_buffer(
-        0,
-        WIDTH,
-        HEIGHT,
-        stride,
-        wl_shm::Format::Xrgb8888,
-        &qh,
-        (),
-    );
+    let buffer = pool.create_buffer(0, WIDTH, HEIGHT, stride, wl_shm::Format::Xrgb8888, &qh, ());
 
     let surface = compositor.create_surface(&qh, ());
     let xdg = wm_base.get_xdg_surface(&surface, &qh, ());

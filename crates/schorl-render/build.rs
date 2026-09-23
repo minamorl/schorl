@@ -44,7 +44,8 @@ fn main() {
     }
 
     let out_dir = PathBuf::from(
-        env::var_os("OUT_DIR").unwrap_or_else(|| fail("OUT_DIR が無い。cargo から呼ばれていない。")),
+        env::var_os("OUT_DIR")
+            .unwrap_or_else(|| fail("OUT_DIR が無い。cargo から呼ばれていない。")),
     );
     let compiler = find_tool(COMPILER_ENV, &COMPILER_CANDIDATES).unwrap_or_else(|| {
         fail(&missing_compiler_message());
@@ -115,9 +116,12 @@ fn compile(compiler: &OsString, source: &str, out: &Path, stage: &str) {
     }
     command.arg("-o").arg(out).arg(source);
 
-    let output = command
-        .output()
-        .unwrap_or_else(|e| fail(&format!("{} を起動できない: {e}", compiler.to_string_lossy())));
+    let output = command.output().unwrap_or_else(|e| {
+        fail(&format!(
+            "{} を起動できない: {e}",
+            compiler.to_string_lossy()
+        ))
+    });
     if !output.status.success() {
         fail(&format!(
             "{source} の SPIR-V 生成が失敗した ({}, 終了 {}).\n{}{}",
@@ -143,7 +147,12 @@ fn validate(validator: &OsString, out: &Path) {
         .arg(TARGET_ENV)
         .arg(out)
         .output()
-        .unwrap_or_else(|e| fail(&format!("{} を起動できない: {e}", validator.to_string_lossy())));
+        .unwrap_or_else(|e| {
+            fail(&format!(
+                "{} を起動できない: {e}",
+                validator.to_string_lossy()
+            ))
+        });
     if !output.status.success() {
         fail(&format!(
             "{} が不正な SPIR-V だと言っている ({}, 終了 {}).\n{}{}",

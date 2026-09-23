@@ -172,9 +172,7 @@ fn surface_size(placement: &WindowPlacement) -> Result<SurfaceSize> {
 
 fn build_texture(vulkan: &VulkanContext, buffer: ClientBuffer) -> Result<(Texture, TextureRoute)> {
     match buffer {
-        ClientBuffer::Shm(frame) => {
-            Ok((Texture::upload_frame(vulkan, &frame)?, TextureRoute::Shm))
-        }
+        ClientBuffer::Shm(frame) => Ok((Texture::upload_frame(vulkan, &frame)?, TextureRoute::Shm)),
         ClientBuffer::Dmabuf(descriptor) => {
             if !vulkan.supports_dmabuf_import() {
                 return Err(Error::new(
@@ -184,7 +182,10 @@ fn build_texture(vulkan: &VulkanContext, buffer: ClientBuffer) -> Result<(Textur
                 ));
             }
             let imported = DmabufImage::import(vulkan, descriptor)?;
-            Ok((Texture::from_dmabuf(vulkan, imported)?, TextureRoute::Dmabuf))
+            Ok((
+                Texture::from_dmabuf(vulkan, imported)?,
+                TextureRoute::Dmabuf,
+            ))
         }
     }
 }

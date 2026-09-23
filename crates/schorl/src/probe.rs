@@ -423,7 +423,11 @@ mod tests {
     fn a_pattern_round_trips_through_its_letters() {
         let pattern = QuadPattern::from_letters("RGBW").expect("distinct");
         assert_eq!(pattern.to_letters(), "RGBW");
-        assert_eq!(QuadPattern::from_letters("RRGB"), None, "repeats are not a pattern");
+        assert_eq!(
+            QuadPattern::from_letters("RRGB"),
+            None,
+            "repeats are not a pattern"
+        );
         assert_eq!(QuadPattern::from_letters("RGB"), None);
         assert_eq!(QuadPattern::from_letters("RGBWW"), None);
     }
@@ -433,10 +437,7 @@ mod tests {
         let pattern = QuadPattern::from_letters("RGBW").expect("distinct");
         let bytes = paint_quadrants(pattern, 64, 48);
         let census = census_bgra(&bytes, 64);
-        assert_eq!(
-            read_pattern(&census, MatchThresholds::DEFAULT),
-            Ok(pattern)
-        );
+        assert_eq!(read_pattern(&census, MatchThresholds::DEFAULT), Ok(pattern));
     }
 
     #[test]
@@ -496,5 +497,4 @@ mod tests {
             other => panic!("expected a stray colour, got {other:?}"),
         }
     }
-
 }

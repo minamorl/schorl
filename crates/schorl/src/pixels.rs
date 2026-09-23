@@ -252,11 +252,7 @@ pub fn describe(dmabuf: &Dmabuf) -> Result<DmabufDescriptor> {
     let width_px = u32::try_from(size.w).map_err(|_| negative_dmabuf(size.w, size.h))?;
     let height_px = u32::try_from(size.h).map_err(|_| negative_dmabuf(size.w, size.h))?;
     let mut planes = Vec::with_capacity(dmabuf.num_planes());
-    for ((fd, offset), stride) in dmabuf
-        .handles()
-        .zip(dmabuf.offsets())
-        .zip(dmabuf.strides())
-    {
+    for ((fd, offset), stride) in dmabuf.handles().zip(dmabuf.offsets()).zip(dmabuf.strides()) {
         let owned = fd.try_clone_to_owned().map_err(|e| {
             Error::new(
                 ErrorCode::HostRefused,
@@ -360,10 +356,7 @@ mod tests {
             inbox.take_newer_than(&id, 2).is_none(),
             "generation 2 is not newer than 2"
         );
-        assert_eq!(
-            inbox.take_newer_than(&id, 1).expect("newer").generation,
-            2
-        );
+        assert_eq!(inbox.take_newer_than(&id, 1).expect("newer").generation, 2);
     }
 
     #[test]

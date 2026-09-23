@@ -36,7 +36,17 @@ use schorl_xr::{PressState, XrEvent};
 /// 一次資料 (OpenXR 1.0 の "Interaction Profile Paths") の綴りをそのまま写した。
 /// `schorl-xr` の headless 側と同じ二本を同じ割り当てで使う。**同じ割り当てで
 /// なければ、headless で測った束縛は描く側の証拠にならない。**
-const PROFILES: [(&str, [&str; 2], [&str; 2], [&str; 2]); 2] = [
+/// profile 一本ぶんの綴り: profile path と、grab / click / aim の左右二本ずつ。
+///
+/// 組を名前で呼ぶのは読む側のためで、並びも中身も変えていない。
+type ProfileBinding = (
+    &'static str,
+    [&'static str; 2],
+    [&'static str; 2],
+    [&'static str; 2],
+);
+
+const PROFILES: [ProfileBinding; 2] = [
     (
         "/interaction_profiles/khr/simple_controller",
         [

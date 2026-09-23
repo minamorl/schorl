@@ -219,7 +219,9 @@ impl fmt::Display for Error {
 
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        self.source.as_ref().map(|e| e.as_ref() as &(dyn StdError + 'static))
+        self.source
+            .as_ref()
+            .map(|e| e.as_ref() as &(dyn StdError + 'static))
     }
 }
 
@@ -314,9 +316,6 @@ mod tests {
         details.insert("k", 1_i64);
         details.insert("k", 2_i64);
         assert_eq!(details.len(), 1);
-        assert_eq!(
-            details.iter().next(),
-            Some(("k", &DetailValue::Int(2)))
-        );
+        assert_eq!(details.iter().next(), Some(("k", &DetailValue::Int(2))));
     }
 }

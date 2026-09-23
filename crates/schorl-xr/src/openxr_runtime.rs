@@ -38,8 +38,8 @@ use openxr::{
     ExtensionSet, FormFactor, Headless, Instance, Path, Posef, ReferenceSpaceType, Space,
     SpaceLocationFlags, Version, ViewConfigurationType,
 };
-use schorl_core::frame::Frame;
 use schorl_core::error::{Error, ErrorCode, Result};
+use schorl_core::frame::Frame;
 use schorl_core::id::TraceId;
 use schorl_panel::grab::ControllerId;
 use schorl_panel::math::{Pose, Quat, Vec3};
@@ -197,9 +197,9 @@ impl HeadlessRuntime {
         })?;
 
         // 2. 拡張を数える。headless が無ければ、この経路は成立しない。
-        let advertised = entry.enumerate_extensions().map_err(|e| {
-            openxr_failure("xrEnumerateInstanceExtensionProperties failed", e)
-        })?;
+        let advertised = entry
+            .enumerate_extensions()
+            .map_err(|e| openxr_failure("xrEnumerateInstanceExtensionProperties failed", e))?;
         let advertised_extension_count = count_advertised(&advertised);
         if !advertised.mnd_headless {
             return Err(Error::new(
@@ -296,10 +296,8 @@ impl HeadlessRuntime {
         let available = session
             .enumerate_reference_spaces()
             .map_err(|e| openxr_failure("xrEnumerateReferenceSpaces failed", e))?;
-        let reference_space_choice = pick_reference_space(
-            self.config.preferred_reference_space,
-            &available,
-        )?;
+        let reference_space_choice =
+            pick_reference_space(self.config.preferred_reference_space, &available)?;
         let reference_space = session
             .create_reference_space(reference_space_choice.to_openxr(), Posef::IDENTITY)
             .map_err(|e| openxr_failure("xrCreateReferenceSpace failed", e))?;
@@ -395,7 +393,16 @@ impl HandInput {
             .map_err(|e| openxr_failure("xrCreateAction failed for hand_aim", e))?;
 
         // 一次資料どおりの component path。profile ごとに綴りが違う。
-        let suggestions: [(&str, [&str; 2], [&str; 2], [&str; 2]); 2] = [
+        //
+        // profile 一本ぶんの綴り: profile path と、grab / click / aim の左右二本ずつ。
+        // 組を名前で呼ぶのは読む側のためで、並びも中身も変えていない。
+        type ProfileSuggestion = (
+            &'static str,
+            [&'static str; 2],
+            [&'static str; 2],
+            [&'static str; 2],
+        );
+        let suggestions: [ProfileSuggestion; 2] = [
             (
                 "/interaction_profiles/khr/simple_controller",
                 [
@@ -579,21 +586,18 @@ impl HeadlessSession {
     /// 束ねられたことを意味しない。掴みとクリックが本当に入力源へ届いているかは
     /// ここで数えるしかない。
     pub fn bound_sources(&self) -> Result<BoundSources> {
-        let grab = self
-            .input
-            .grab
-            .bound_sources(&self.session)
-            .map_err(|e| openxr_failure("xrEnumerateBoundSourcesForAction failed for grab", e))?;
-        let click = self
-            .input
-            .click
-            .bound_sources(&self.session)
-            .map_err(|e| openxr_failure("xrEnumerateBoundSourcesForAction failed for click", e))?;
-        let aim = self
-            .input
-            .aim
-            .bound_sources(&self.session)
-            .map_err(|e| openxr_failure("xrEnumerateBoundSourcesForAction failed for aim", e))?;
+        let grab =
+            self.input.grab.bound_sources(&self.session).map_err(|e| {
+                openxr_failure("xrEnumerateBoundSourcesForAction failed for grab", e)
+            })?;
+        let click =
+            self.input.click.bound_sources(&self.session).map_err(|e| {
+                openxr_failure("xrEnumerateBoundSourcesForAction failed for click", e)
+            })?;
+        let aim =
+            self.input.aim.bound_sources(&self.session).map_err(|e| {
+                openxr_failure("xrEnumerateBoundSourcesForAction failed for aim", e)
+            })?;
         Ok(BoundSources {
             grab: self.spell_paths(&grab)?,
             click: self.spell_paths(&click)?,
@@ -660,10 +664,9 @@ impl HeadlessSession {
                     .space
                     .locate(&self.reference_space, time)
                     .map_err(|e| openxr_failure("xrLocateSpace failed for a hand", e))?;
-                if location
-                    .location_flags
-                    .contains(SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID)
-                {
+                if location.location_flags.contains(
+                    SpaceLocationFlags::POSITION_VALID | SpaceLocationFlags::ORIENTATION_VALID,
+                ) {
                     out.push(XrEvent::ControllerPose {
                         controller,
                         pose: pose_from_openxr(location.pose),

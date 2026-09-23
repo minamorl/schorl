@@ -8,9 +8,24 @@
 //! 束ねているのは配線のためで、個々の trait は互いに独立している
 //! (`house.effect_boundary.no_god_capability`)。
 //!
-//! この phase で在るのは配線と純粋な変換だけ。入力の配りと OpenXR の実装は
-//! 後続 phase が [`schorl_input::PointerSink`] / [`schorl_xr::XrRuntime`] を
-//! 実装して差し込む。
+//! **v1 の組み立ては [`SchorlSession`] である。** compositor 面と描画面を一本に
+//! 繋ぎ、繋いできた toplevel を 360 度の空間へ置く
+//! (`space.content_unit` / `v1.window_count` / `v1.window_displayed`)。
+//!
+//! **[`Schorl`] と [`Capabilities`] は板一枚の頃の組み立てであり、v1 の経路には
+//! 無い。** spec 0.2 の原文3 で、空間に置かれる単位はディスプレイからウィンドウへ
+//! 移り (`space.content_unit = window`)、上限一枚を凍らせていた `v1.panel_count` は
+//! `v1.window_count = one_or_more` へ差し替わった。上限一枚は御主人様の原文では
+//! なく結衣が置いた scope cap だった、というのが退役の理由である
+//! (spec の `@meta withdrawn_v0_2` (3))。
+//!
+//! 消していないのは `schorl-capture` / `schorl-display` / `schorl-panel-driver` を
+//! 消していないのと同じ理由で、下に在る試験が見ている不変条件は
+//! `v1.panel_count` を除いて今も生きているため。掴み・置き直し・カーソルの三本は
+//! 板語彙からウィンドウ語彙へ鍵を移しただけで意味が変わっていない
+//! (spec の `@meta withdrawn_v0_2` (5) と (8)、逐語「三本の意味は不変」)。
+//! **ここから v1 のバイナリへは一本も辺が出ていない。** 借りている計算の正本は
+//! `schorl-panel` に在り、そちらは v1 の経路も通る。
 //!
 //! **spec 0.2 の原文3 で、この境界から捕捉 (`schorl-capture`) と
 //! ホスト出力の貸し借り (`schorl-display`) が外れた。** schorl 自身が compositor に
@@ -24,7 +39,9 @@ use schorl_core::log::{Level, LogRecord, LogSink};
 use schorl_core::time::{Clock, UtcTimestamp};
 use schorl_input::{KeyboardSink, PointerEvent, PointerEventKind, PointerSink};
 use schorl_panel::cursor::{CursorResolution, PointerHold, resolve_cursor, to_pixels};
-use schorl_panel::grab::{ControllerId, GrabState, begin_grab, panel_pose_while_held, release_grab};
+use schorl_panel::grab::{
+    ControllerId, GrabState, begin_grab, panel_pose_while_held, release_grab,
+};
 use schorl_panel::math::{Pose, Vec3};
 use schorl_panel::panel::Panel;
 use schorl_xr::{SessionConfig, XrRuntime};
@@ -49,9 +66,10 @@ pub use session::{SchorlSession, SessionOptions, StepOutcome};
 pub use stage::{Stage, StageReport};
 pub use stdout_log::StdoutJsonLogSink;
 
-/// 注入する capability 一式。
+/// 注入する capability 一式。**板一枚の頃の面で、v1 の経路には無い。**
 ///
 /// 一つの trait に押し込まず、最小の trait を並べて持つ。
+/// v1 の組み立てが何を借りるかは [`SessionOptions`] が持つ。
 pub struct Capabilities {
     /// 時刻。
     pub clock: Box<dyn Clock>,
@@ -74,6 +92,9 @@ impl core::fmt::Debug for Capabilities {
 }
 
 /// 板一枚ぶんの状態と、注入された capability。
+///
+/// **退役した面である。** 原文3 でこの構えは v1 から外れた (crate の冒頭を見よ)。
+/// v1 の組み立ては [`SchorlSession`]。
 pub struct Schorl {
     caps: Capabilities,
     panel: Panel,
@@ -119,13 +140,21 @@ impl Schorl {
         &mut self.caps
     }
 
-    /// セッションの構え。背景は黒、板は一枚 (`space.background` / `v1.panel_count`)。
+    /// セッションの構え。背景は黒 (`space.background`)、板は一枚。
+    ///
+    /// 「一枚」を縛っていた `v1.panel_count` は原文3 で退役し、いま効いているのは
+    /// `v1.window_count = one_or_more` である。**この面が一枚しか持てないことは、
+    /// v1 の上限が一枚だという意味ではない。** 上限を持たないのは
+    /// [`SchorlSession`] の側である。
     pub const fn session_config(&self) -> SessionConfig {
         SessionConfig::for_panel(self.panel)
     }
 
-    /// コントローラの位置を板平面へ落としてカーソルを決める
-    /// (`ux.cursor_mapping` / `ux.cursor_beyond_edge`)。
+    /// コントローラの位置を板平面へ落としてカーソルを決める。
+    ///
+    /// `ux.cursor_mapping` / `ux.cursor_beyond_edge` は生きている pin だが、鍵は
+    /// 板からウィンドウへ移っている。ここが落とす先は板平面であって
+    /// ウィンドウ平面ではない。**満たしているのは同じ不変条件の板側の写しである。**
     pub fn cursor(&self, controller_point: Vec3, hold: PointerHold) -> CursorResolution {
         resolve_cursor(&self.panel, controller_point, hold)
     }
@@ -152,7 +181,8 @@ impl Schorl {
         })
     }
 
-    /// 板を掴む (`v1.panel_grab`)。
+    /// 板を掴む。`v1.panel_grab` は原文3 で `v1.window_grab` へ改鍵された
+    /// (鍵だけで、掴む主体がコントローラであることは変わっていない)。
     pub fn begin_panel_grab(&mut self, controller: ControllerId, controller_pose: Pose) {
         self.grab = begin_grab(controller, controller_pose, self.panel.pose());
     }
@@ -164,7 +194,8 @@ impl Schorl {
         }
     }
 
-    /// 離す。板はその場に残る (`ux.panel_not_head_locked`)。
+    /// 離す。板はその場に残る。`ux.panel_not_head_locked` は原文3 で
+    /// `ux.window_not_head_locked` へ改鍵された (鍵だけで、意味は不変)。
     pub fn end_panel_grab(&mut self) {
         self.grab = release_grab();
     }
@@ -180,6 +211,13 @@ impl Schorl {
     }
 }
 
+/// 板一枚の頃の組み立てを見る試験。
+///
+/// **ここが測っているのは [`Schorl`] であって v1 の経路ではない。** 六本のうち
+/// 五本が見ている不変条件 (黒い背景・板平面への射影・縁の外の追従・掴んで離した
+/// あとに残ること・json 一行のログ) は、鍵がウィンドウ語彙へ移っただけで spec 0.4
+/// でも生きている。残る一本だけが退役した `v1.panel_count` を見ており、名前で
+/// そう断ってある。
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,8 +241,10 @@ mod tests {
         Schorl::new(caps, Panel::default_single())
     }
 
+    /// 黒い背景は生きている pin (`space.background`)。板が一枚なのは退役した
+    /// `v1.panel_count` であって、v1 の上限ではない。
     #[test]
-    fn the_wired_session_is_black_with_one_panel() {
+    fn the_retired_panel_wiring_is_black_with_one_panel() {
         let schorl = wired();
         let config = schorl.session_config();
         assert_eq!(config.background, Background::Black);

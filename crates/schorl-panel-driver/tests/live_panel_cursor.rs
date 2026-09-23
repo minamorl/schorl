@@ -22,7 +22,9 @@ static RUNTIME_LOCK: Mutex<()> = Mutex::new(());
 
 fn hold_the_runtime() -> MutexGuard<'static, ()> {
     // 前の試験が落ちて毒が付いていても、直列化の目的は果たせる。
-    RUNTIME_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    RUNTIME_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// 本物のランタイムから来た手の姿勢が、板平面への射影を通って Linux 側の
@@ -121,7 +123,10 @@ fn real_controller_poses_drive_the_panel_cursor() {
                     // 運ぶこと) を見る。
                     let res = Panel::default_single().resolution();
                     assert!(*x_px >= 0 && (*x_px as u32) < res.width_px, "x_px = {x_px}");
-                    assert!(*y_px >= 0 && (*y_px as u32) < res.height_px, "y_px = {y_px}");
+                    assert!(
+                        *y_px >= 0 && (*y_px as u32) < res.height_px,
+                        "y_px = {y_px}"
+                    );
                 }
                 PointerEventKind::Button { .. } => {
                     unreachable!("nothing pressed a button in this run")
