@@ -10,7 +10,9 @@
 //! どの protocol で取るか (`free schorl.capture.protocol` /
 //! `free schorl.capture.protocol_version`) はここでは決めない。決まっているのは
 //! 「どの出力から取るか」「取れた絵は何か」「本物か」だけ。
-//! **実装はこの phase では書かない。** 穴は trait の署名として残す。
+//! 実ホスト向けの実装は [`screencopy`] にある (wlr-screencopy v3)。
+
+pub mod screencopy;
 
 use schorl_core::error::{Error, ErrorCode, Result};
 use schorl_core::id::TraceId;
@@ -150,7 +152,8 @@ impl Frame {
 
 /// 出力から一枚取る capability。
 ///
-/// **実装は後続 phase。** ここに在るのは署名だけで、panic する stub は置かない。
+/// 実ホスト向けの実装は [`screencopy::ScreencopyFrameSource`]、
+/// 差し替え用の贋物は [`testing::SolidColourFrameSource`]。
 pub trait FrameSource: Send {
     /// 指定した出力から一枚取る。
     fn capture(&mut self, output: &OutputId) -> Result<Frame>;
