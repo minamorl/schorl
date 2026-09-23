@@ -1,0 +1,22 @@
+[package]
+name = "schorl-render"
+description = "絵を出す側: 黒い空間を自分で持ち、矩形のサーフェスへ dmabuf / shm のテクスチャを貼って OpenXR の swapchain へ描き込む"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+schorl-core.workspace = true
+schorl-scope.workspace = true
+schorl-panel.workspace = true
+# 姿勢・掴み・セッションの語彙を借りる。XrSession / XrRuntime をここで実装する。
+schorl-xr.workspace = true
+# Vulkan。既定 feature (loaded + libloading) で libvulkan.so.1 を実行時に dlopen する。
+# link 時に Vulkan を要求しないので、ドライバが居ないホストでも build は通り、不在は封筒で返る。
+ash = "0.38.0"
+# OpenXR の loader も実行時に開く。版は schorl-xr と揃える。
+openxr = "0.22.0"
+
+[lints]
+workspace = true
