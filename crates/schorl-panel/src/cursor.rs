@@ -190,6 +190,51 @@ mod tests {
     }
 
     #[test]
+    fn the_result_is_the_projection_and_not_where_a_ray_would_hit() {
+        // `ux.cursor_mapping` は「レーザーが板に当たった点ではなく板平面への射影」
+        // と読める。その二つが別の答えを出す配置で、射影側だけが通ることを押さえる。
+        let panel = panel(); // 中心 (0,0,-1)、法線 +Z
+        let controller = Vec3::new(0.3, 0.2, -0.4);
+
+        // 板の中心へ向けて構えたコントローラ。レイはその向きに飛ぶ。
+        let aim = panel.pose().pose.position.sub(controller);
+        // レイと板平面 (z = -1) の交点。
+        let t = (panel.pose().pose.position.z - controller.z) / aim.z;
+        let ray_hit = controller.add(aim.scale(t));
+        let ray_point = PanelPoint {
+            u_m: ray_hit.x - panel.pose().pose.position.x,
+            v_m: ray_hit.y - panel.pose().pose.position.y,
+        };
+        assert!(
+            close(ray_point.u_m, 0.0) && close(ray_point.v_m, 0.0),
+            "the ray aimed at the centre hits the centre: {ray_point:?}"
+        );
+
+        let projected = project_onto_panel_plane(&panel, controller);
+        assert!(
+            close(projected.u_m, 0.3) && close(projected.v_m, 0.2),
+            "the projection keeps the hand's own offset: {projected:?}"
+        );
+        assert_ne!(
+            projected, ray_point,
+            "a ray-intersection implementation would pass the other assertions too"
+        );
+    }
+
+    #[test]
+    fn the_projection_ignores_where_the_controller_points() {
+        // 手の位置が同じなら、どこを向いていても板上の位置は同じ。向きを見ない
+        // ことが射影の定義であり、レイとの違いである。
+        let panel = panel();
+        let hand = Vec3::new(-0.2, 0.15, -0.3);
+        let first = project_onto_panel_plane(&panel, hand);
+        // 向きを変えても引数に向きが入らないので、答えは動かない。
+        let second = project_onto_panel_plane(&panel, hand);
+        assert_eq!(first, second);
+        assert!(close(first.u_m, -0.2) && close(first.v_m, 0.15), "{first:?}");
+    }
+
+    #[test]
     fn a_rotated_panel_projects_along_its_own_axes() {
         let turned = Panel::default_single().with_pose(PanelPose::world(Pose::new(
             Vec3::ZERO,

@@ -19,6 +19,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cfg-if"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -47,6 +53,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -57,6 +73,26 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "openxr"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53770c8f7d3f185bcb577b78f2ed8e33bbf7cdf5cd57fb68b5ec0b4117b79de6"
+dependencies = [
+ "libc",
+ "libloading",
+ "openxr-sys",
+]
+
+[[package]]
+name = "openxr-sys"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "febb5d50cee7b964b69d5b7a810ed9620fc64f41382ffefe05434754c7a48877"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "pkg-config"
@@ -176,10 +212,14 @@ dependencies = [
 name = "schorl-xr"
 version = "0.1.0"
 dependencies = [
+ "openxr",
  "schorl-capture",
  "schorl-core",
+ "schorl-display",
+ "schorl-input",
  "schorl-panel",
  "schorl-scope",
+ "schorl-verify",
 ]
 
 [[package]]

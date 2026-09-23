@@ -2,26 +2,46 @@
 //!
 //! 満たす pin:
 //! - `space.background: require schorl.virtual_space.background = black` —
-//!   [`SessionConfig`] の背景は [`Background`] なので黒以外を組めない。
+//!   [`SessionConfig`] の背景は [`Background`] なので黒以外を組めない。さらに
+//!   [`composition::CompositionPlan`] が黒を**層として**必ず出す。OPAQUE に任せる
+//!   だけでは足りない理由は [`composition`] の冒頭に一次資料の逐語で書いてある。
 //! - `display.presence` / `display.purpose` — セッションは常に板一枚を伴う。
 //! - `v1.panel_grab` — 掴みの入口は [`XrEvent::GrabButton`] と
 //!   [`XrEvent::ControllerPose`] だけ。頭の姿勢から板を動かす口は無い。
 //! - `verify.machine_scope` の `openxr_session_opens` — セッションを開く操作を
 //!   [`XrRuntime::open_session`] という一本の署名にしてあるので、機械検査が
-//!   そこだけを突ける。
+//!   そこだけを突ける。実体は [`openxr_runtime::HeadlessRuntime`]。
 //! - `house.resource_lifecycle.*` — [`XrSession`] は明示終了と `Drop` の両方で閉じる。
 //!
 //! どのランタイムを借りるか (`free schorl.runtime.*` / `free schorl.session.kind`)
-//! はここでは決めない。**OpenXR の呼び出しはこの phase では書かない。**
-//! 穴は trait の署名として残す。束縛の割り当ては `free schorl.controller.binding_layout`。
+//! は pin が自由にしている軸である。この lane は [`SessionKind::Full`] を持つ
+//! 自前のセッションとして書き、配信経路には触れていない。
+//!
+//! **HMD 無しで機械が確かめられるのはここまでである。** 実機を被っての受け入れは
+//! [`schorl_verify`](../schorl_verify/index.html) の人間ゲートの仕事で、機械の緑で
+//! 代用しない (`verify.no_green_substitute`)。
 
 use schorl_capture::Frame;
 use schorl_core::error::{Error, ErrorCode, Result};
 use schorl_core::id::TraceId;
+use schorl_input::{ButtonState, Keycode};
 use schorl_panel::grab::ControllerId;
 use schorl_panel::math::Pose;
 use schorl_panel::panel::Panel;
 use schorl_scope::Background;
+
+pub mod composition;
+pub mod driver;
+pub mod openxr_runtime;
+pub mod sleep;
+
+pub use composition::{Backdrop, CompositionPlan, EnvironmentBlend, QuadLayer};
+pub use driver::{ControllerPoses, DriverConfig, PanelDriver, PanelWiring, StepOutcome};
+pub use openxr_runtime::{
+    BoundSources, HeadlessConfig, HeadlessRuntime, HeadlessSession, ReferenceSpaceChoice,
+    RuntimeFacts,
+};
+pub use sleep::{Sleeper, ThreadSleeper};
 
 /// セッションの持ち方。
 ///
@@ -73,6 +93,18 @@ pub enum PressState {
     Released,
 }
 
+impl PressState {
+    /// Linux へ戻す側の押下へ写す。
+    ///
+    /// 観測と注入は別の型なので、境界のここだけで写す。
+    pub const fn to_input_state(self) -> ButtonState {
+        match self {
+            PressState::Pressed => ButtonState::Pressed,
+            PressState::Released => ButtonState::Released,
+        }
+    }
+}
+
 /// セッションの生死。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SessionState {
@@ -110,6 +142,18 @@ pub enum XrEvent {
         /// 押下。
         state: PressState,
     },
+    /// キーが動いた。
+    ///
+    /// `pin v1.key_delivered` は「キー入力が Linux へ届く」ことだけを縛っており、
+    /// **VR 側でキーがどこから来るか (物理キーボードの横取りか、空間に出す板上の
+    /// 鍵盤か) は pin されていない。** この枝は外へ渡す経路の入口であり、どの装置が
+    /// これを立てるかはまだ決まっていない。
+    Key {
+        /// どのキーか。綴りの解釈は Linux 側の配列に委ねる。
+        keycode: Keycode,
+        /// 押下。
+        state: PressState,
+    },
 }
 
 /// 開いているセッション。
@@ -125,19 +169,28 @@ pub trait XrSession: Send {
 
     /// 明示的に閉じる。失敗を報告できる経路。
     fn end(&mut self) -> Result<()>;
+
+    /// このセッションが合成面を持つか。
+    ///
+    /// 既定は真。`XR_MND_headless` のセッションは偽で、逐語は
+    /// 「flink:xrEnumerateSwapchainFormats must: return ename:XR_SUCCESS but
+    /// enumerate `0` formats.」— 面が無いので貼れない。
+    /// 呼ぶ側はここを見て、貼れないセッションに絵を渡さない。**貼っていないのに
+    /// 貼ったと数えないための口である。**
+    fn presents_frames(&self) -> bool {
+        true
+    }
 }
 
 /// セッションを開く capability。
-///
-/// **実装は後続 phase。** ここに在るのは署名だけ。
 pub trait XrRuntime: Send + Sync {
     /// 構えのとおりにセッションを開く。
     fn open_session(&self, config: &SessionConfig) -> Result<Box<dyn XrSession>>;
 }
 
-/// 後続 phase が埋める本番の描画ループ。
+/// 開いたセッションを回しきる口。
 ///
-/// 署名だけを先に固定しておく。panic する stub は置かない。
+/// 実体は [`driver::PanelDriver`]。
 pub trait SessionLoop {
     /// 開いたセッションを回しきる。
     fn run(&mut self, session: &mut dyn XrSession) -> Result<()>;
@@ -158,7 +211,7 @@ pub mod testing {
     use super::*;
 
     /// 台本どおりの出来事を返し、出した枚数を数えるだけのセッション。
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct ScriptedSession {
         /// 次に返す出来事。
         pub scripted_events: Vec<XrEvent>,
@@ -166,11 +219,47 @@ pub mod testing {
         pub submitted_frames: usize,
         /// 閉じた回数。
         pub ended: usize,
+        /// 合成面を持つことにするか。headless を模すときは偽。
+        pub presents: bool,
+        /// 何巡目で `Stopping` を混ぜるか。`None` なら混ぜない。
+        pub stop_after_polls: Option<usize>,
+        /// 取り出しを失敗させるか。解放経路の試験に要る。
+        pub poll_error: bool,
+        /// これまでの取り出し回数。
+        pub polls: usize,
+    }
+
+    impl Default for ScriptedSession {
+        fn default() -> Self {
+            Self {
+                scripted_events: Vec::new(),
+                submitted_frames: 0,
+                ended: 0,
+                presents: true,
+                stop_after_polls: None,
+                poll_error: false,
+                polls: 0,
+            }
+        }
     }
 
     impl XrSession for ScriptedSession {
         fn poll_events(&mut self) -> Result<Vec<XrEvent>> {
-            Ok(std::mem::take(&mut self.scripted_events))
+            if self.poll_error {
+                return Err(Error::new(
+                    ErrorCode::Internal,
+                    "the scripted session was asked to fail while polling",
+                    TraceId::unattributed(),
+                ));
+            }
+            self.polls = self.polls.saturating_add(1);
+            let mut events = std::mem::take(&mut self.scripted_events);
+            if let Some(limit) = self.stop_after_polls {
+                if self.polls >= limit {
+                    events.push(XrEvent::StateChanged(SessionState::Stopping));
+                }
+            }
+            Ok(events)
         }
 
         fn submit_frame(&mut self, _frame: &Frame, _panel: &Panel) -> Result<()> {
@@ -181,6 +270,10 @@ pub mod testing {
         fn end(&mut self) -> Result<()> {
             self.ended = self.ended.saturating_add(1);
             Ok(())
+        }
+
+        fn presents_frames(&self) -> bool {
+            self.presents
         }
     }
 
@@ -195,8 +288,7 @@ pub mod testing {
         fn open_session(&self, _config: &SessionConfig) -> Result<Box<dyn XrSession>> {
             Ok(Box::new(ScriptedSession {
                 scripted_events: self.scripted_events.clone(),
-                submitted_frames: 0,
-                ended: 0,
+                ..Default::default()
             }))
         }
     }
@@ -260,5 +352,22 @@ mod tests {
     fn a_missing_runtime_is_an_envelope_not_a_panic() {
         let err = runtime_unavailable("no active OpenXR runtime json on this host");
         assert_eq!(err.code(), ErrorCode::CapabilityUnavailable);
+    }
+
+    #[test]
+    fn a_press_maps_onto_the_injection_side_one_to_one() {
+        assert_eq!(PressState::Pressed.to_input_state(), ButtonState::Pressed);
+        assert_eq!(PressState::Released.to_input_state(), ButtonState::Released);
+    }
+
+    #[test]
+    fn a_scripted_session_presents_by_default_and_can_be_made_headless() {
+        let presenting = super::testing::ScriptedSession::default();
+        assert!(presenting.presents_frames());
+        let headless = super::testing::ScriptedSession {
+            presents: false,
+            ..Default::default()
+        };
+        assert!(!headless.presents_frames());
     }
 }
