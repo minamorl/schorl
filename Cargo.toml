@@ -4,6 +4,9 @@
 # 0.2 の原文3 で v1 から外れた経路 (crates/schorl-capture, crates/schorl-display,
 # crates/schorl-panel-driver) は member に残してあるが、crate schorl はどれにも
 # 依存しない。残す理由は実測資産だから。
+# crates/schorl-render は絵を出す側。黒い空間を自分で持ち、矩形のサーフェスへ
+# dmabuf / shm のテクスチャを貼って OpenXR の swapchain へ描き込む
+# (space.background / space.extent / v1.window_displayed / v1.window_count)。
 # この manifest が満たす pin:
 #   release.no_publication  — workspace.package.publish = false (crates.io へは出さない)
 #   release.local_git_only  — remote を足さない。ここには何も書けないので運用側の掟。
@@ -22,6 +25,7 @@ members = [
     "crates/schorl-capture",
     "crates/schorl-input",
     "crates/schorl-xr",
+    "crates/schorl-render",
     "crates/schorl-panel-driver",
     "crates/schorl-verify",
     "crates/schorl-compositor",
@@ -46,6 +50,7 @@ schorl-display = { path = "crates/schorl-display" }
 schorl-capture = { path = "crates/schorl-capture" }
 schorl-input = { path = "crates/schorl-input" }
 schorl-xr = { path = "crates/schorl-xr" }
+schorl-render = { path = "crates/schorl-render" }
 schorl-panel-driver = { path = "crates/schorl-panel-driver" }
 schorl-verify = { path = "crates/schorl-verify" }
 schorl-compositor = { path = "crates/schorl-compositor" }
