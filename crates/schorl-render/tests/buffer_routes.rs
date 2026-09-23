@@ -1,8 +1,11 @@
 //! 二つの buffer 経路が本当に画素を運ぶかを、実物の Vulkan で測る試験。
 //!
-//! この機には Vulkan が在るが、他のホストでは無いことがある。**無いホストで
-//! 赤くしない。** 代わりに「capability が無い」ことを封筒で確かめて緑にする。
-//! 数える緑と数えない緑を混ぜないため、どちらに落ちたかは試験の出力に出す。
+//! この機には Vulkan が在るが、他のホストでは無いことがある。**前提が欠けた
+//! ときに緑を返さない。** 何も測れなかった走りを `ok` として数えると、
+//! `cargo test` の緑が「dmabuf 経路を測った」という意味を失う。だから前提の門は
+//! 黙って `return` せず、何が無くて走れないかを名指しして落ちる。
+//! (以前はここで `skipping: ...` と書いて `return` していた。Vulkan を潰した
+//! 走りでも `6 passed; 0 failed` になってしまうので、その形を捨てた。)
 //!
 //! `pin verify.machine_scope` の `client_frame_reaches_swapchain` に対して
 //! この試験が測るのは「提出された画素が受け側へ届く」ところまでである。
@@ -80,44 +83,93 @@ fn distinct(bytes: &[u8]) -> usize {
 
 /// この試験ファイル全体で一つだけ持つ Vulkan の面。
 ///
-/// `None` は「このホストに使える Vulkan が無い」ことを表す。**無いホストで
-/// 赤くしない**ので、その場合は試験を飛ばす。
-static VULKAN: std::sync::OnceLock<std::sync::Mutex<Option<VulkanContext>>> =
-    std::sync::OnceLock::new();
+/// `absence` が `Some` なら、このホストに使える Vulkan が無い。そのときは
+/// **緑を返さず**、何が無いかを名指しして落ちる。
+struct SharedVulkan {
+    /// 使える device。`absence` が `Some` のときだけ `None` になる。
+    context: std::sync::Mutex<Option<VulkanContext>>,
+    /// device を起こせなかった理由 (封筒の message)。起こせたなら `None`。
+    absence: Option<String>,
+    /// この device が dma_buf の取り込み経路を持つか。
+    ///
+    /// 起こした時点で控えるのは、**門を mutex の外で引く**ためである。
+    /// 借用の中で落とすと共有 device を毒し、dmabuf と関係の無い試験まで
+    /// 「前の試験が毒した」という別の理由で落ちて、何が無いのかが読めなくなる。
+    dmabuf_import: bool,
+}
+
+/// 一度だけ device を起こす置き場。
+static VULKAN: std::sync::OnceLock<SharedVulkan> = std::sync::OnceLock::new();
+
+/// device を一度だけ起こして借りる。
+fn shared_vulkan() -> &'static SharedVulkan {
+    VULKAN.get_or_init(|| match VulkanContext::standalone("schorl-render-test") {
+        Ok(context) => SharedVulkan {
+            dmabuf_import: context.supports_dmabuf_import(),
+            context: std::sync::Mutex::new(Some(context)),
+            absence: None,
+        },
+        Err(e) => {
+            // 起こせなかった理由が想定の二つでないなら、それ自体が異常である。
+            assert!(
+                matches!(
+                    e.code(),
+                    ErrorCode::CapabilityUnavailable | ErrorCode::HostRefused
+                ),
+                "an unexpected error code for a missing Vulkan: {:?}",
+                e.code()
+            );
+            SharedVulkan {
+                context: std::sync::Mutex::new(None),
+                absence: Some(e.message().to_owned()),
+                dmabuf_import: false,
+            }
+        }
+    })
+}
 
 /// 共有された device を借りて、閉じた形で一仕事する。
 ///
 /// 借用の間は mutex を握るので、試験は互いに直列になる。
 fn with_vulkan<F: FnOnce(&VulkanContext)>(body: F) {
-    let cell = VULKAN.get_or_init(|| {
-        let context = match VulkanContext::standalone("schorl-render-test") {
-            Ok(context) => Some(context),
-            Err(e) => {
-                assert!(
-                    matches!(
-                        e.code(),
-                        ErrorCode::CapabilityUnavailable | ErrorCode::HostRefused
-                    ),
-                    "an unexpected error code for a missing Vulkan: {:?}",
-                    e.code()
-                );
-                eprintln!("skipping: no usable Vulkan on this host ({})", e.message());
-                None
-            }
-        };
-        std::sync::Mutex::new(context)
-    });
+    borrow_device(false, body);
+}
+
+/// 同じく借りるが、dma_buf の取り込み経路も前提として要求する。
+fn with_dmabuf_vulkan<F: FnOnce(&VulkanContext)>(body: F) {
+    borrow_device(true, body);
+}
+
+/// **前提の門はここに在る。**
+///
+/// 揃っていなければ、何も測らずに `ok` を返すのではなく、何が無いかを名指し
+/// して落ちる。門はどちらも mutex を取る前に置いてあるので、前提が欠けたときの
+/// panic が共有 device を毒すことはない。
+fn borrow_device<F: FnOnce(&VulkanContext)>(needs_dmabuf: bool, body: F) {
+    let shared = shared_vulkan();
+    assert!(
+        shared.absence.is_none(),
+        "no usable Vulkan on this host, so this check would measure nothing: {}. \
+         it needs a Vulkan loader plus an ICD this user can open; run the check on a \
+         machine that has one.",
+        shared.absence.as_deref().unwrap_or_default()
+    );
+    assert!(
+        !needs_dmabuf || shared.dmabuf_import,
+        "this Vulkan device has no dma_buf import path, so the dmabuf route would measure \
+         nothing. run the check on a device whose driver offers dma_buf import of DRM \
+         format modifiers."
+    );
     // poison していたら、前の試験が panic した後である。そこを緑にしない。
-    let guard = cell
+    let guard = shared
+        .context
         .lock()
         .expect("a previous test poisoned the shared device");
-    match guard.as_ref() {
-        Some(context) => {
-            body(context);
-            context.wait_idle().expect("the device goes idle");
-        }
-        None => eprintln!("skipping: no usable Vulkan on this host"),
-    }
+    let context = guard
+        .as_ref()
+        .expect("the gate above already refused a host without a usable Vulkan");
+    body(context);
+    context.wait_idle().expect("the device goes idle");
 }
 
 #[test]
@@ -158,12 +210,7 @@ fn the_shm_fallback_carries_every_pixel() {
 
 #[test]
 fn the_dmabuf_route_carries_every_pixel() {
-    with_vulkan(|context| {
-        if !context.supports_dmabuf_import() {
-            // **「通った」と偽らない。** 経路が無いことをそのまま記す。
-            eprintln!("skipping: this Vulkan device has no dma_buf import path");
-            return;
-        }
+    with_dmabuf_vulkan(|context| {
         let frame = pattern();
         let measured = import_own_export_for_measurement(context, &frame)
             .expect("the producer side exports and the consumer side imports");
@@ -207,7 +254,7 @@ fn the_dmabuf_route_carries_every_pixel() {
 #[test]
 fn both_routes_reach_the_same_pixels() {
     // 退路が本物の代わりになっていること。**片方だけ生きている構成を緑にしない。**
-    with_vulkan(|context| {
+    with_dmabuf_vulkan(|context| {
         let frame = pattern();
         let shm = Texture::upload_frame(context, &frame).expect("the shm upload succeeds");
         let shm_read = sample_texture_to_host(
@@ -220,10 +267,6 @@ fn both_routes_reach_the_same_pixels() {
         .expect("the read back succeeds");
         drop(shm);
 
-        if !context.supports_dmabuf_import() {
-            eprintln!("skipping the comparison: no dma_buf path on this device");
-            return;
-        }
         let measured = import_own_export_for_measurement(context, &frame)
             .expect("the dma_buf round trip works");
         let (imported, producer) = measured.into_imported();
@@ -265,11 +308,7 @@ fn an_exportable_image_hands_its_pixels_over_a_dma_buf_fd() {
     // 「export した fd が、受け側 (`DmabufImage::import`) で同じ画素になる」
     // ところまで。**`zwp_linux_dmabuf_v1` を越える一本通しは
     // `schorl-seam-check` が別に測る。**
-    with_vulkan(|context| {
-        if !context.supports_dmabuf_import() {
-            eprintln!("skipping: this Vulkan device has no dma_buf import path");
-            return;
-        }
+    with_dmabuf_vulkan(|context| {
         let frame = pattern();
         let exportable = ExportableImage::create(
             context,
@@ -330,11 +369,7 @@ fn an_exportable_image_hands_its_pixels_over_a_dma_buf_fd() {
 fn an_exportable_image_refuses_a_layout_the_device_does_not_offer() {
     // 許した配置が一つも使えないとき、**黙って別の配置へ丸めない。**
     // 丸めてしまうと、compositor が申告していない配置の dmabuf を出すことになる。
-    with_vulkan(|context| {
-        if !context.supports_dmabuf_import() {
-            eprintln!("skipping: this Vulkan device has no dma_buf import path");
-            return;
-        }
+    with_dmabuf_vulkan(|context| {
         // vendor 0xfe は `drm_fourcc.h` のどの vendor でもない。
         let nonsense = DrmModifier::from_u64(0xfe00_0000_0000_0001);
         let refused =

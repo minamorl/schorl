@@ -159,11 +159,15 @@ mod tests {
 
     #[test]
     fn a_bound_socket_reports_a_name_and_removes_its_files_when_dropped() {
-        let runtime_dir = match std::env::var("XDG_RUNTIME_DIR") {
-            Ok(dir) => dir,
-            // 走らせる場所に runtime dir が無いなら、この検査は何も言えない。
-            Err(_) => return,
-        };
+        // 前提の門。runtime dir が無いなら何も測れないが、**測れなかった走りを
+        // `ok` と数えない。** 何が無いかを名指しして落ちる。
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+            panic!(
+                "XDG_RUNTIME_DIR is not set, so schorl has nowhere to place its own wayland \
+                 socket and this check would measure nothing. run it inside a user session, \
+                 or point XDG_RUNTIME_DIR at a writable directory."
+            )
+        });
         let socket = OwnedSocket::bind_auto().expect("a free wayland-N exists");
         let name = socket.name().as_str().to_owned();
         let path = std::path::Path::new(&runtime_dir).join(&name);
@@ -172,11 +176,19 @@ mod tests {
         assert!(!path.exists(), "{path:?} must be gone once schorl lets go");
     }
 
+    // 宿主の compositor が実際に一本ソケットを持っている場所でしか測れない。
+    // 黙って `return` して `ok` を数える形を捨て、前提が無いことを `ignore` の
+    // 理由として表に出す (走らせ方: `cargo test -p schorl-compositor -- --ignored`)。
     #[test]
+    #[ignore = "needs WAYLAND_DISPLAY naming a live host compositor socket; run with --ignored \
+                inside that session"]
     fn the_host_compositor_socket_name_is_refused() {
-        let Ok(host) = std::env::var("WAYLAND_DISPLAY") else {
-            return;
-        };
+        let host = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| {
+            panic!(
+                "WAYLAND_DISPLAY is not set, so there is no host socket name to refuse and \
+                 this check would measure nothing. run it inside a wayland session."
+            )
+        });
         let err = OwnedSocket::bind_named(&host).expect_err("the host keeps its socket");
         assert_eq!(err.code(), ErrorCode::InvalidArgument);
     }
