@@ -1,0 +1,45 @@
+[package]
+name = "schorl-compositor"
+description = "schorl 自身が Wayland compositor になる面: 自前ソケット・xdg-shell・seat・クライアントバッファの受け口"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# 入れ子 backend は検証経路であって compositor 本体ではない。
+# 既定では入るが、外しても lib はそのまま build できる (house.effect_boundary.substitution)。
+default = ["nested-winit"]
+nested-winit = ["smithay/backend_winit", "smithay/renderer_gl", "dep:libc"]
+
+[dependencies]
+schorl-core.workspace = true
+schorl-scope.workspace = true
+# ウィンドウ平面への射影と掴みの計算はこちらが正本。ここでは借りるだけ。
+schorl-panel.workspace = true
+# 押した・離した・キー番号の語彙を借りる。
+schorl-input.workspace = true
+
+# Wayland compositor の土台。
+# default features は DRM / udev / libseat / X11 / Vulkan まで引くので落とし、
+# この面が要る三つだけを立てる:
+#   wayland_frontend — wl_compositor / xdg-shell / wl_seat / wl_shm / linux-dmabuf の server 側
+#   backend_winit    — 既存の Wayland セッションの上へ入れ子で起こす検証経路
+#   renderer_gl      — backend_winit が要求する (GLES2 レンダラ)
+smithay = { version = "0.7.0", default-features = false, features = ["wayland_frontend"] }
+
+# 入れ子 backend を普通に畳むために SIGINT / SIGTERM を捕まえる。
+# 旗を立てるだけの handler にしか使わない。
+libc = { version = "0.2", optional = true }
+
+# pin code.id.scheme: require id.scheme in [uuidv7, ulid] の uuidv7 側の実体。
+uuid = { version = "1.26.1", default-features = false, features = ["std", "v7"] }
+
+[dev-dependencies]
+# 試験のためだけの、schorl へ繋ぐ側の実装。
+# 「入力がクライアントへ本当に届いたか」は、届いた側に言わせないと測れない。
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+
+[lints]
+workspace = true
