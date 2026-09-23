@@ -11,6 +11,18 @@ schorl-core.workspace = true
 schorl-scope.workspace = true
 schorl-panel.workspace = true
 schorl-capture.workspace = true
+# 板の上で決まった 2D 位置・クリック・キーを Linux へ戻す口を呼ぶために要る。
+# 実装は schorl-input の後続 phase が埋める。ここは呼ぶ側だけ。
+schorl-display.workspace = true
+schorl-input.workspace = true
+# OpenXR の loader を実行時に dlopen する (既定 feature = loaded + libloading)。
+# link 時に loader を要求しないので、ランタイムが居ないホストでも build は通り、
+# 不在は封筒で返る。
+openxr = "0.22.0"
+
+[dev-dependencies]
+# 機械検査の範囲と実機受け入れを混ぜないための型。試験だけが使う。
+schorl-verify.workspace = true
 
 [lints]
 workspace = true
