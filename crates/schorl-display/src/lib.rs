@@ -15,6 +15,8 @@
 //! どの仕掛けで出力を用意するか (`free schorl.display.provisioning_method`) は
 //! ここでは決めない。決まっているのは「作ったら返す」「恒久設定は触らない」だけ。
 
+pub mod hyprland;
+
 use std::fmt;
 use std::sync::Arc;
 
