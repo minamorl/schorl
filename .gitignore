@@ -2,3 +2,7 @@
 /target
 **/target/
 **/*.rs.bk
+
+# shader の SPIR-V は shaders/*.vert / *.frag から build script が焼く生成物。
+# OUT_DIR へ出るので repo には現れないが、古い checkout の置き土産を拾わないため明示する。
+*.spv

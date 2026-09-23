@@ -606,8 +606,10 @@ fn create_pipeline(
     render_pass: vk::RenderPass,
     layout: vk::PipelineLayout,
 ) -> Result<vk::Pipeline> {
-    let vert_spv = include_bytes!("../shaders/quad.vert.spv");
-    let frag_spv = include_bytes!("../shaders/quad.frag.spv");
+    // .spv は build script が shaders/*.vert / *.frag から OUT_DIR へ焼く。
+    // repo には source だけを置く (pin public.no_build_artifacts)。
+    let vert_spv = include_bytes!(concat!(env!("OUT_DIR"), "/quad.vert.spv"));
+    let frag_spv = include_bytes!(concat!(env!("OUT_DIR"), "/quad.frag.spv"));
     let vert = create_shader_module(device, vert_spv)?;
     let frag = match create_shader_module(device, frag_spv) {
         Ok(frag) => frag,

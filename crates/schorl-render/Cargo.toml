@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
+# shader は GLSL の source だけを repo へ置き、.spv は build script が OUT_DIR へ焼く
+# (pin public.no_build_artifacts)。自動検出に任せず明示する。
+build = "build.rs"
 
 [dependencies]
 schorl-core.workspace = true
