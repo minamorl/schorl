@@ -590,7 +590,7 @@ impl XrVulkanSession {
             return Ok((false, None));
         }
 
-        let (_, views) = self
+        let (view_state, views) = self
             .session
             .locate_views(
                 VIEW_CONFIGURATION,
@@ -598,6 +598,16 @@ impl XrVulkanSession {
                 &self.space,
             )
             .map_err(|e| openxr_failure("xrLocateViews failed", e))?;
+        // 向きが無効なとき、仕様は XrView の orientation を読むことを禁じている。
+        // WiVRn は HMD の追跡が切れた間 (外した直後など) ゼロの quat を返し、それを
+        // 層へ載せると xrEndFrame が XR_ERROR_POSE_INVALID で断る。層を出さずに閉じる。
+        if !view_state.contains(openxr::ViewStateFlags::ORIENTATION_VALID) {
+            self.frame_stream
+                .end(frame_state.predicted_display_time, self.blend_mode, &[])
+                .map_err(|e| openxr_failure("xrEndFrame for an untracked frame failed", e))?;
+            self.render_facts.record_skip();
+            return Ok((false, None));
+        }
         if views.len() != self.swapchains.len() {
             return Err(Error::new(
                 ErrorCode::Internal,
