@@ -33,9 +33,16 @@ pub struct Texture {
     owned_memory: Option<vk::DeviceMemory>,
     /// dmabuf 経路で借りている image。落とすとこちらが先に閉じる。
     imported: Option<DmabufImage>,
+    /// shm の次フレームにも使い回す転送元。dmabuf 経路では `None`。
+    staging_buffer: Option<vk::Buffer>,
+    /// `staging_buffer` を支える host-visible memory。
+    staging_memory: Option<vk::DeviceMemory>,
+    /// `staging_buffer` へ安全に写せる byte 数。
+    staging_bytes: usize,
     image: vk::Image,
     view: vk::ImageView,
     sampler: vk::Sampler,
+    format: vk::Format,
     width_px: u32,
     height_px: u32,
     route: TextureRoute,
@@ -73,14 +80,19 @@ impl Texture {
         };
         let width_px = imported.width_px();
         let height_px = imported.height_px();
+        let format = imported.format();
         let texture = Self {
             device,
             owned_image: None,
             owned_memory: None,
             imported: Some(imported),
+            staging_buffer: None,
+            staging_memory: None,
+            staging_bytes: 0,
             image,
             view,
             sampler,
+            format,
             width_px,
             height_px,
             route: TextureRoute::Dmabuf,
@@ -175,26 +187,88 @@ impl Texture {
             }
         };
 
-        let texture = Self {
+        let mut texture = Self {
             device,
             owned_image: Some(image),
             owned_memory: Some(memory),
             imported: None,
+            staging_buffer: None,
+            staging_memory: None,
+            staging_bytes: 0,
             image,
             view,
             sampler,
+            format,
             width_px: frame.width_px(),
             height_px: frame.height_px(),
             route: TextureRoute::Shm,
         };
-        stage_pixels_into_image(
-            context,
-            image,
-            frame,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        )?;
+        let (staging_buffer, staging_memory) =
+            create_staging_buffer(context, frame.pixels().len())?;
+        texture.staging_buffer = Some(staging_buffer);
+        texture.staging_memory = Some(staging_memory);
+        texture.staging_bytes = frame.pixels().len();
+        texture.write_frame(context, frame, vk::ImageLayout::UNDEFINED)?;
         Ok(texture)
+    }
+
+    /// 同じ shm texture の storage を保ったまま、新しい画素へ更新できるか。
+    pub fn can_update_from(&self, frame: &Frame) -> bool {
+        self.route == TextureRoute::Shm
+            && self.width_px == frame.width_px()
+            && self.height_px == frame.height_px()
+            && DrmFormat::from_pixel_format(frame.format()).to_vk_format() == Some(self.format)
+            && frame.pixels().len() <= self.staging_bytes
+    }
+
+    /// 同じ寸法・format の shm frame を既存 image へ載せ直す。
+    ///
+    /// image / memory / view / sampler は作り直さない。前の draw は呼び手が完了を
+    /// 待っていること。この関数も copy の完了を待ってから返る。
+    pub fn update_frame(&mut self, context: &VulkanContext, frame: &Frame) -> Result<()> {
+        if !self.can_update_from(frame) {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                "the existing texture is not compatible with this shm frame",
+                TraceId::unattributed(),
+            )
+            .with_detail("texture_width_px", i64::from(self.width_px))
+            .with_detail("texture_height_px", i64::from(self.height_px))
+            .with_detail("frame_width_px", i64::from(frame.width_px()))
+            .with_detail("frame_height_px", i64::from(frame.height_px())));
+        }
+        self.write_frame(context, frame, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+    }
+
+    fn write_frame(
+        &self,
+        context: &VulkanContext,
+        frame: &Frame,
+        old_layout: vk::ImageLayout,
+    ) -> Result<()> {
+        let buffer = self.staging_buffer.ok_or_else(|| {
+            Error::new(
+                ErrorCode::Internal,
+                "the shm texture has no staging buffer",
+                TraceId::unattributed(),
+            )
+        })?;
+        let memory = self.staging_memory.ok_or_else(|| {
+            Error::new(
+                ErrorCode::Internal,
+                "the shm texture has no staging memory",
+                TraceId::unattributed(),
+            )
+        })?;
+        write_staging_to_image(
+            context,
+            buffer,
+            memory,
+            self.image,
+            frame,
+            old_layout,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )
     }
 
     /// sampler から読む view。
@@ -241,6 +315,12 @@ impl Drop for Texture {
         unsafe {
             self.device.destroy_sampler(self.sampler, None);
             self.device.destroy_image_view(self.view, None);
+            if let Some(buffer) = self.staging_buffer.take() {
+                self.device.destroy_buffer(buffer, None);
+            }
+            if let Some(memory) = self.staging_memory.take() {
+                self.device.free_memory(memory, None);
+            }
             if let Some(image) = self.owned_image.take() {
                 self.device.destroy_image(image, None);
             }
@@ -336,10 +416,27 @@ pub fn stage_pixels_into_image(
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
 ) -> Result<()> {
-    let device = context.device().clone();
-    let bytes = frame.pixels();
+    let (buffer, memory) = create_staging_buffer(context, frame.pixels().len())?;
+    let result = write_staging_to_image(
+        context, buffer, memory, image, frame, old_layout, new_layout,
+    );
+    // 成功でも失敗でも staging を返す (`house.resource_lifecycle.release_paths`)。
+    // write_staging_to_image は成功なら queue idle まで待っている。
+    let device = context.device();
+    unsafe {
+        device.destroy_buffer(buffer, None);
+        device.free_memory(memory, None);
+    }
+    result
+}
+
+fn create_staging_buffer(
+    context: &VulkanContext,
+    byte_len: usize,
+) -> Result<(vk::Buffer, vk::DeviceMemory)> {
+    let device = context.device();
     let buffer_info = vk::BufferCreateInfo::default()
-        .size(bytes.len() as u64)
+        .size(byte_len as u64)
         .usage(vk::BufferUsageFlags::TRANSFER_SRC)
         .sharing_mode(vk::SharingMode::EXCLUSIVE);
     // SAFETY: buffer_info はこの場の値。
@@ -365,20 +462,6 @@ pub fn stage_pixels_into_image(
             unsafe { device.free_memory(memory, None) };
             return Err(vulkan_failure("vkBindBufferMemory failed", e));
         }
-        // SAFETY: memory は HOST_VISIBLE で、要求した長さぶん確保されている。
-        let mapped = unsafe {
-            device.map_memory(memory, 0, bytes.len() as u64, vk::MemoryMapFlags::empty())
-        }
-        .map_err(|e| {
-            // SAFETY: memory はこの関数が確保したもの。
-            unsafe { device.free_memory(memory, None) };
-            vulkan_failure("vkMapMemory failed", e)
-        })?;
-        // SAFETY: mapped は bytes.len() 以上の書き込み可能な領域を指す。
-        unsafe {
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), mapped.cast::<u8>(), bytes.len());
-            device.unmap_memory(memory);
-        }
         Ok(memory)
     };
     let memory = match staged() {
@@ -390,7 +473,49 @@ pub fn stage_pixels_into_image(
         }
     };
 
-    let result = crate::renderer::with_one_shot_commands(context, |device, cmd| {
+    Ok((buffer, memory))
+}
+
+fn write_staging_to_image(
+    context: &VulkanContext,
+    buffer: vk::Buffer,
+    memory: vk::DeviceMemory,
+    image: vk::Image,
+    frame: &Frame,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+) -> Result<()> {
+    let device = context.device();
+    let bytes = frame.pixels();
+    let (source_stage, source_access) = match old_layout {
+        vk::ImageLayout::UNDEFINED => (
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::AccessFlags::empty(),
+        ),
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::AccessFlags::SHADER_READ,
+        ),
+        other => {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                "the staging upload does not know the source access for this image layout",
+                TraceId::unattributed(),
+            )
+            .with_detail("old_layout", format!("{other:?}")));
+        }
+    };
+    // SAFETY: memory は create_staging_buffer が byte 数以上を HOST_VISIBLE で確保した。
+    let mapped =
+        unsafe { device.map_memory(memory, 0, bytes.len() as u64, vk::MemoryMapFlags::empty()) }
+            .map_err(|e| vulkan_failure("vkMapMemory failed", e))?;
+    // SAFETY: mapped は bytes.len() 以上の書き込み可能な領域を指す。
+    unsafe {
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), mapped.cast::<u8>(), bytes.len());
+        device.unmap_memory(memory);
+    }
+
+    crate::renderer::with_one_shot_commands(context, |device, cmd| {
         let range = vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
             base_mip_level: 0,
@@ -405,7 +530,7 @@ pub fn stage_pixels_into_image(
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .image(image)
             .subresource_range(range)
-            .src_access_mask(vk::AccessFlags::empty())
+            .src_access_mask(source_access)
             .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);
         let to_read = vk::ImageMemoryBarrier::default()
             .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
@@ -436,7 +561,7 @@ pub fn stage_pixels_into_image(
         unsafe {
             device.cmd_pipeline_barrier(
                 cmd,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
+                source_stage,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::DependencyFlags::empty(),
                 &[],
@@ -461,16 +586,7 @@ pub fn stage_pixels_into_image(
             );
         }
         Ok(())
-    });
-
-    // 成功でも失敗でも staging を返す (`house.resource_lifecycle.release_paths`)。
-    // SAFETY: buffer と memory はこの関数が作ったもので、上の submit は
-    // with_one_shot_commands の中で待ち終わっている。
-    unsafe {
-        device.destroy_buffer(buffer, None);
-        device.free_memory(memory, None);
-    }
-    result
+    })
 }
 
 /// テクスチャを sampler から読み、その結果を CPU の byte 列として返す。

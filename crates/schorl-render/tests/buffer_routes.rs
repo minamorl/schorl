@@ -60,6 +60,26 @@ fn pattern() -> Frame {
     .expect("the pattern dimensions agree")
 }
 
+fn shifted_pattern() -> Frame {
+    let original = pattern();
+    let mut pixels = original.pixels().to_vec();
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel[0] = pixel[0].wrapping_add(19);
+        pixel[1] = pixel[1].wrapping_add(31);
+        pixel[2] = pixel[2].wrapping_add(47);
+    }
+    Frame::new(
+        FrameOrigin::TestDouble,
+        PixelFormat::Xrgb8888,
+        WIDTH,
+        HEIGHT,
+        WIDTH * PixelFormat::Xrgb8888.bytes_per_pixel(),
+        FixedClock::at_millis(1).now_utc(),
+        pixels,
+    )
+    .expect("the shifted pattern dimensions agree")
+}
+
 /// 色の面 (B, G, R) だけを比べる。X の面は format が無視する。
 fn mismatches(expected: &[u8], actual: &[u8]) -> usize {
     if expected.len() != actual.len() {
@@ -205,6 +225,37 @@ fn the_shm_fallback_carries_every_pixel() {
         );
 
         drop(texture);
+    });
+}
+
+#[test]
+fn the_shm_texture_updates_without_replacing_its_image() {
+    with_vulkan(|context| {
+        let first = pattern();
+        let second = shifted_pattern();
+        let mut texture =
+            Texture::upload_frame(context, &first).expect("the first shm upload succeeds");
+        let image = texture.image();
+
+        assert!(texture.can_update_from(&second));
+        texture
+            .update_frame(context, &second)
+            .expect("the existing image accepts the next frame");
+        assert_eq!(texture.image(), image, "the VkImage must be reused");
+
+        let read_back = sample_texture_to_host(
+            context,
+            &texture,
+            ash::vk::Format::B8G8R8A8_UNORM,
+            WIDTH,
+            HEIGHT,
+        )
+        .expect("the updated image reads back");
+        assert_eq!(mismatches(second.pixels(), &read_back), 0);
+        assert!(
+            mismatches(first.pixels(), &read_back) > 0,
+            "the image still contains the first frame"
+        );
     });
 }
 

@@ -122,6 +122,13 @@ impl Stage {
             let Some(fresh) = inbox.take_newer_than(&placement.id, seen) else {
                 continue;
             };
+            if let (Some(i), ClientBuffer::Shm(frame)) = (at, &fresh.buffer)
+                && self.surfaces[i].texture.can_update_from(frame)
+            {
+                self.surfaces[i].texture.update_frame(vulkan, frame)?;
+                self.keys[i].1 = fresh.generation;
+                continue;
+            }
             let (texture, route) = build_texture(vulkan, fresh.buffer)?;
             match route {
                 TextureRoute::Dmabuf => report.dmabuf_textures += 1,
