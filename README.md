@@ -39,10 +39,14 @@ toplevel を 360 度の空間へ置き、OpenXR の swapchain へ出すところ
 schorl [client argv…]
 ```
 
-引数を与えるとそのクライアントを schorl のソケットへ向けて起こす。与えなければ
-ソケット名を出して待つので、別の端末から `WAYLAND_DISPLAY=<その名前> <client>` で
-繋ぐ。宿主の compositor のセッションは置き換えない
-(`pin wm.host_compositor_coexistence`)。
+起動すると `.desktop` file から作った launcher が最初の VR window として現れる。
+宿主 desktop に同時に出る `schorl input` window を focus している間だけ、物理
+keyboard / mouse が選択中の VR window へ届く。F8 で操作対象を次の window へ送る。
+input window から focus を外せば、入力は普通の desktop に戻る。
+
+引数を与えた場合は launcher に加え、その client も schorl の socket へ向けて起こす。
+別の端末から `WAYLAND_DISPLAY=<log に出た socket 名> <client>` で繋ぐこともできる。
+宿主 compositor の session は置き換えない (`pin wm.host_compositor_coexistence`)。
 
 ## HMD 無しの確認
 

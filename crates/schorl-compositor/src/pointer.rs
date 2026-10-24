@@ -27,8 +27,8 @@ use schorl_input::{
 use schorl_panel::cursor::{PixelPoint, PointerHold, resolve_cursor, to_pixels};
 use schorl_panel::math::Vec3;
 
-use smithay::backend::input::ButtonState as SmithayButtonState;
-use smithay::input::pointer::{ButtonEvent, MotionEvent};
+use smithay::backend::input::{Axis, AxisSource, ButtonState as SmithayButtonState};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::utils::{Logical, Point};
 
 use crate::state::SchorlCompositor;
@@ -83,8 +83,18 @@ impl SchorlCompositor {
         self.pointer_target.as_ref()
     }
 
+    /// VR に描く cursor の現在位置。window-local pixel。
+    pub fn pointer_position(&self) -> Option<(&WindowId, PixelPoint)> {
+        self.pointer_position
+            .as_ref()
+            .map(|(window, point)| (window, *point))
+    }
+
     /// ポインタの宛先を明示的に決める。
     pub fn set_pointer_target(&mut self, window: Option<WindowId>) {
+        if window.is_none() {
+            self.pointer_position = None;
+        }
         self.pointer_target = window;
     }
 
@@ -125,6 +135,7 @@ impl SchorlCompositor {
                 let location: Point<f64, Logical> =
                     Point::from((f64::from(rect.x + local.x), f64::from(rect.y + local.y)));
                 self.set_pointer_target(Some(window.clone()));
+                self.pointer_position = Some((window.clone(), local));
                 self.send_motion(Some((surface, origin)), location, time_ms)?;
                 Ok(PointerDelivery::Moved {
                     window: window.clone(),
@@ -157,6 +168,7 @@ impl SchorlCompositor {
         let location: Point<f64, Logical> =
             Point::from((f64::from(rect.x + local.x), f64::from(rect.y + local.y)));
         self.set_pointer_target(Some(window.clone()));
+        self.pointer_position = Some((window.clone(), local));
         self.send_motion(Some((surface, origin)), location, time_ms)?;
         Ok(PointerDelivery::Moved {
             window: window.clone(),
@@ -182,6 +194,18 @@ impl SchorlCompositor {
                 state: to_smithay_state(state),
             },
         );
+        pointer.frame(self);
+        Ok(())
+    }
+
+    /// 現在 pointer focus を持つ client へ scroll を送る。
+    pub fn scroll_pointer(&mut self, horizontal: f64, vertical: f64, time_ms: u32) -> Result<()> {
+        let pointer = self.pointer_handle()?;
+        let frame = AxisFrame::new(time_ms)
+            .source(AxisSource::Continuous)
+            .value(Axis::Horizontal, horizontal)
+            .value(Axis::Vertical, vertical);
+        pointer.axis(self, frame);
         pointer.frame(self);
         Ok(())
     }

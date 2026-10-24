@@ -25,6 +25,9 @@ openxr = "0.22.0"
 # 既存の試験用クライアントと同じ版を使う。
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client"] }
+# 宿主 compositor 上に入力専用の小窓を一枚出す。focus 中の入力だけを受けるので、
+# evdev を奪わず普段の desktop と明示的に切り替えられる。
+winit = { version = "0.30.13", default-features = false, features = ["wayland", "rwh_06"] }
 
 [lints]
 workspace = true

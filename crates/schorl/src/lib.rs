@@ -54,6 +54,8 @@ pub mod stdout_log;
 // (`house.effect_boundary.location = injected_at_boundary`)。
 pub mod grab;
 pub mod hands;
+pub mod host_input;
+pub mod launcher;
 pub mod pixels;
 pub mod probe;
 pub mod session;

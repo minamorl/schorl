@@ -121,8 +121,14 @@ impl RenderTarget {
 
 /// push constant に載せる量。
 ///
-/// mvp の 16 個だけ。サーフェスの寸法と姿勢はそこに畳んである。
-const PUSH_CONSTANT_BYTES: u32 = 16 * 4;
+/// mvp の 16 個 + cursor の x/y/radius_x/radius_y。
+const PUSH_CONSTANT_BYTES: u32 = 20 * 4;
+
+#[repr(C)]
+struct PushConstants {
+    mvp: [f32; 16],
+    cursor: [f32; 4],
+}
 
 /// 一度に描けるサーフェスの上限。
 ///
@@ -339,8 +345,12 @@ impl Renderer {
             );
             for (surface, set) in surfaces.iter().zip(descriptor_sets.iter()) {
                 let mvp = vp.mul(surface.model).to_array();
+                let push = PushConstants {
+                    mvp,
+                    cursor: surface.cursor,
+                };
                 let bytes: &[u8] = core::slice::from_raw_parts(
-                    mvp.as_ptr().cast::<u8>(),
+                    (&raw const push).cast::<u8>(),
                     PUSH_CONSTANT_BYTES as usize,
                 );
                 device.cmd_bind_descriptor_sets(
@@ -354,7 +364,7 @@ impl Renderer {
                 device.cmd_push_constants(
                     self.command_buffer,
                     self.pipeline_layout,
-                    vk::ShaderStageFlags::VERTEX,
+                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                     0,
                     bytes,
                 );
@@ -585,7 +595,7 @@ fn create_pipeline_layout(
 ) -> Result<vk::PipelineLayout> {
     let set_layouts = [descriptor_layout];
     let ranges = [vk::PushConstantRange {
-        stage_flags: vk::ShaderStageFlags::VERTEX,
+        stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
         offset: 0,
         size: PUSH_CONSTANT_BYTES,
     }];

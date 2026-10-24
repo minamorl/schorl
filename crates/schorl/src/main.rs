@@ -15,10 +15,11 @@
 //! schorl [client argv…]
 //! ```
 //!
-//! 引数を与えると、そのクライアントを schorl のソケットへ向けて起こす。
-//! 与えなければソケット名を出して待つので、別の端末から
-//! `WAYLAND_DISPLAY=<その名前> <client>` で繋げばよい。宿主の
-//! `WAYLAND_DISPLAY` は奪わない (`pin wm.host_compositor_coexistence`)。
+//! `.desktop` file から作る launcher を最初の window として自動で起こす。引数を
+//! 与えた場合は、その client も schorl の socket へ向けて起こす。宿主側には
+//! PC input 用の小窓を一枚置き、その窓が focus 中だけ keyboard / mouse を VR 内の
+//! 選択中 window へ渡す。F8 で対象を次へ送る。宿主の `WAYLAND_DISPLAY` は奪わない
+//! (`pin wm.host_compositor_coexistence`)。
 //!
 //! `SCHORL_RUN_FOR_SECONDS` を与えるとその秒数で畳む。与えなければランタイムが
 //! 終了を告げるまで回る。
@@ -35,6 +36,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use schorl::StdoutJsonLogSink;
+use schorl::host_input::HostInput;
 use schorl::session::{SchorlSession, SessionOptions};
 use schorl_core::error::Result;
 use schorl_core::id::{Id, IdScheme, TraceId};
@@ -90,6 +92,7 @@ struct Observed {
 }
 
 fn serve(argv: &[String], sink: Arc<dyn LogSink>, clock: &dyn Clock) -> Result<Observed> {
+    let mut host_input = HostInput::open()?;
     let mut session = SchorlSession::open(SessionOptions::default(), Arc::clone(&sink))?;
     emit(
         sink.as_ref(),
@@ -101,7 +104,10 @@ fn serve(argv: &[String], sink: Arc<dyn LogSink>, clock: &dyn Clock) -> Result<O
         ),
     );
 
-    let mut child = session.spawn_client(argv)?;
+    let mut children = vec![session.spawn_launcher()?];
+    if let Some(child) = session.spawn_client(argv)? {
+        children.push(child);
+    }
     let mut observed = Observed::default();
 
     if !session.wait_until_running(&ThreadSleeper)? {
@@ -117,12 +123,19 @@ fn serve(argv: &[String], sink: Arc<dyn LogSink>, clock: &dyn Clock) -> Result<O
             .and_then(|v| v.parse::<u64>().ok())
             .map(Duration::from_secs);
         let started = Instant::now();
+        let input_started = Instant::now();
         loop {
+            let time_ms = u32::try_from(input_started.elapsed().as_millis() % u128::from(u32::MAX))
+                .unwrap_or(0);
+            let mut close_requested = false;
+            for event in host_input.poll()? {
+                close_requested |= session.apply_host_input(event, time_ms)?;
+            }
             let outcome = session.step(false)?;
             if !session.stage().is_empty() {
                 observed.client_pixels_drawn = true;
             }
-            if outcome.exiting {
+            if outcome.exiting || close_requested {
                 break;
             }
             if limit.is_some_and(|l| started.elapsed() >= l) {
@@ -141,7 +154,7 @@ fn serve(argv: &[String], sink: Arc<dyn LogSink>, clock: &dyn Clock) -> Result<O
             session.xr().render_facts().to_json().render()
         ),
     );
-    if let Some(child) = child.as_mut() {
+    for child in &mut children {
         let _ = child.kill();
         let _ = child.wait();
     }

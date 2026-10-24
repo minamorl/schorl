@@ -31,12 +31,13 @@ use schorl_core::id::TraceId;
 use schorl_core::log::LogSink;
 use schorl_core::time::{Clock, SystemClock};
 use schorl_input::{ButtonState, PointerButton};
-use schorl_panel::cursor::PointerHold;
+use schorl_panel::cursor::{PixelPoint, PointerHold};
 use schorl_render::xr::{XrVulkanRuntime, XrVulkanSession};
 use schorl_xr::{PressState, XrEvent};
 
 use crate::grab::{GrabEffect, WindowGrabs, WindowPlacement, window_under};
 use crate::hands::HandInput;
+use crate::host_input::HostInputEvent;
 use crate::pixels::{PixelInbox, relay};
 use crate::stage::{Stage, StageReport};
 
@@ -55,6 +56,9 @@ pub struct SchorlSession {
     journal: Journal,
     started: Instant,
     frames_submitted: u64,
+    host_target: Option<WindowId>,
+    host_cursor: (f64, f64),
+    known_host_windows: Vec<WindowId>,
 }
 
 impl core::fmt::Debug for SchorlSession {
@@ -176,6 +180,9 @@ impl SchorlSession {
             journal,
             started: Instant::now(),
             frames_submitted: 0,
+            host_target: None,
+            host_cursor: (0.5, 0.5),
+            known_host_windows: Vec::new(),
         })
     }
 
@@ -253,6 +260,27 @@ impl SchorlSession {
         Ok(Some(child))
     }
 
+    /// 同じ build directory にある VR launcher client を起こす。
+    pub fn spawn_launcher(&self) -> Result<std::process::Child> {
+        let current = std::env::current_exe().map_err(|e| {
+            Error::new(
+                ErrorCode::HostRefused,
+                "could not locate the schorl executable",
+                TraceId::unattributed(),
+            )
+            .caused_by(e)
+        })?;
+        let launcher = current.with_file_name("schorl-launcher");
+        self.spawn_client(&[launcher.to_string_lossy().into_owned()])?
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::Internal,
+                    "the launcher command unexpectedly had no program",
+                    TraceId::unattributed(),
+                )
+            })
+    }
+
     /// 一巡。
     ///
     /// 1. Wayland を回す (繋ぎに来たものを入れ、commit を捌く)。
@@ -266,6 +294,7 @@ impl SchorlSession {
         let time_ms = u32::try_from(elapsed.as_millis() % u128::from(u32::MAX)).unwrap_or(0);
 
         self.compositor.turn(time_ms)?;
+        self.sync_host_windows()?;
 
         outcome.exiting = self.xr.pump_events()?;
 
@@ -288,6 +317,15 @@ impl SchorlSession {
         outcome.stage = self
             .stage
             .sync(&placements, &self.inbox, self.xr.vulkan())?;
+        let pointer = self
+            .compositor
+            .state()
+            .pointer_position()
+            .map(|(window, point)| (window.clone(), point));
+        self.stage.set_cursor(
+            pointer.as_ref().map(|(window, point)| (window, *point)),
+            &placements,
+        );
 
         if self.xr.is_running() {
             let (submitted, captured) = self
@@ -300,6 +338,135 @@ impl SchorlSession {
             }
         }
         Ok(outcome)
+    }
+
+    /// PC input window の出来事を schorl の seat へ渡す。
+    ///
+    /// `true` は input window が閉じられ、session を畳むべきことを表す。
+    pub fn apply_host_input(&mut self, event: HostInputEvent, time_ms: u32) -> Result<bool> {
+        match event {
+            HostInputEvent::Motion { x, y } => {
+                self.host_cursor = (x, y);
+                self.point_host_cursor(time_ms)?;
+            }
+            HostInputEvent::Button { button, state } => {
+                self.ensure_host_focus()?;
+                self.compositor
+                    .state_mut()
+                    .press_button(button, state, time_ms)?;
+            }
+            HostInputEvent::Scroll {
+                horizontal,
+                vertical,
+            } => {
+                self.ensure_host_focus()?;
+                self.compositor
+                    .state_mut()
+                    .scroll_pointer(horizontal, vertical, time_ms)?;
+            }
+            HostInputEvent::Key { keycode, state } => {
+                self.ensure_host_focus()?;
+                self.compositor
+                    .state_mut()
+                    .press_key(keycode, state, time_ms)?;
+            }
+            HostInputEvent::SelectNextWindow => {
+                self.select_next_host_window(time_ms)?;
+            }
+            HostInputEvent::CloseRequested => return Ok(true),
+        }
+        Ok(false)
+    }
+
+    fn sync_host_windows(&mut self) -> Result<()> {
+        let mapped: Vec<WindowId> = self
+            .compositor
+            .state()
+            .windows()
+            .iter()
+            .filter(|window| window.is_mapped())
+            .map(|window| window.id().clone())
+            .collect();
+        if let Some(newest) = mapped
+            .iter()
+            .rev()
+            .find(|window| !self.known_host_windows.contains(window))
+        {
+            self.host_target = Some(newest.clone());
+            self.compositor
+                .state_mut()
+                .focus_keyboard_on(Some(newest))?;
+        } else if self
+            .host_target
+            .as_ref()
+            .is_some_and(|target| !mapped.contains(target))
+        {
+            self.host_target = mapped.last().cloned();
+        }
+        self.known_host_windows = mapped;
+        Ok(())
+    }
+
+    fn ensure_host_focus(&mut self) -> Result<()> {
+        if self.host_target.is_none() {
+            self.host_target = self.known_host_windows.last().cloned();
+        }
+        self.compositor
+            .state_mut()
+            .focus_keyboard_on(self.host_target.as_ref())
+    }
+
+    fn point_host_cursor(&mut self, time_ms: u32) -> Result<()> {
+        if self.host_target.is_none() {
+            self.host_target = self.known_host_windows.last().cloned();
+        }
+        let Some(target) = self.host_target.clone() else {
+            return Ok(());
+        };
+        let resolution = self
+            .compositor
+            .state()
+            .windows()
+            .get(&target)
+            .map(|window| window.plane().resolution())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InvalidArgument,
+                    "the selected PC input window is no longer mapped",
+                    self.journal.trace_id().clone(),
+                )
+            })?;
+        let point = PixelPoint {
+            x: (self.host_cursor.0 * f64::from(resolution.width_px.saturating_sub(1))).round()
+                as i32,
+            y: (self.host_cursor.1 * f64::from(resolution.height_px.saturating_sub(1))).round()
+                as i32,
+        };
+        self.compositor
+            .state_mut()
+            .point_at_local(&target, point, time_ms)?;
+        self.compositor
+            .state_mut()
+            .focus_keyboard_on(Some(&target))?;
+        Ok(())
+    }
+
+    fn select_next_host_window(&mut self, time_ms: u32) -> Result<()> {
+        if self.known_host_windows.is_empty() {
+            return Ok(());
+        }
+        let current = self
+            .host_target
+            .as_ref()
+            .and_then(|target| {
+                self.known_host_windows
+                    .iter()
+                    .position(|window| window == target)
+            })
+            .unwrap_or(self.known_host_windows.len() - 1);
+        self.host_target =
+            Some(self.known_host_windows[(current + 1) % self.known_host_windows.len()].clone());
+        self.point_host_cursor(time_ms)
     }
 
     /// 出来事を一つ食べる。掴みと、ウィンドウ上のカーソルと押下を配る。

@@ -13,6 +13,7 @@
 use schorl_compositor::window::WindowId;
 use schorl_core::error::{Error, ErrorCode, Result};
 use schorl_core::id::TraceId;
+use schorl_panel::cursor::PixelPoint;
 use schorl_render::dmabuf::DmabufImage;
 use schorl_render::facts::TextureRoute;
 use schorl_render::space::{Surface, SurfaceSize};
@@ -82,6 +83,34 @@ impl Stage {
     pub fn route_of(&self, window: &WindowId) -> Option<TextureRoute> {
         let index = self.keys.iter().position(|(id, _)| id == window)?;
         Some(self.surfaces[index].texture.route())
+    }
+
+    /// 現在 pointer focus を持つ window だけへ cursor overlay を付ける。
+    pub fn set_cursor(
+        &mut self,
+        cursor: Option<(&WindowId, PixelPoint)>,
+        placements: &[WindowPlacement],
+    ) {
+        for (index, (window, _)) in self.keys.iter().enumerate() {
+            let shown = cursor.and_then(|(target, point)| {
+                if target != window {
+                    return None;
+                }
+                let placement = placements
+                    .iter()
+                    .find(|placement| &placement.id == window)?;
+                let resolution = placement.plane.resolution();
+                let width = resolution.width_px as f32;
+                let height = resolution.height_px as f32;
+                Some([
+                    (point.x as f32 / width).clamp(0.0, 1.0),
+                    (point.y as f32 / height).clamp(0.0, 1.0),
+                    10.0 / width,
+                    10.0 / height,
+                ])
+            });
+            self.surfaces[index].set_cursor(shown);
+        }
     }
 
     /// そのウィンドウがいま立っている姿勢。

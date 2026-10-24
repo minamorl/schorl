@@ -565,6 +565,7 @@ pub fn sample_texture_to_host(
             let draws = [SurfaceDraw {
                 texture,
                 model: Mat4::IDENTITY,
+                cursor: [-1.0; 4],
             }];
             let extent = vk::Extent2D { width, height };
             let drawn = renderer.draw_view(&target, extent, view_projection, &draws);

@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use schorl_core::error::{Error, ErrorCode, Result};
 use schorl_core::id::IdGen;
+use schorl_panel::cursor::PixelPoint;
 
 use smithay::backend::allocator::Format as DrmFormat;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -122,6 +123,7 @@ pub struct SchorlCompositor {
     pub(crate) journal: Journal,
     pub(crate) default_window_size: (i32, i32),
     pub(crate) pointer_target: Option<WindowId>,
+    pub(crate) pointer_position: Option<(WindowId, PixelPoint)>,
     pub(crate) delivered: DeliveredKeys,
     pub(crate) running: bool,
 }
@@ -260,6 +262,7 @@ impl SchorlCompositor {
             journal,
             default_window_size,
             pointer_target: None,
+            pointer_position: None,
             delivered: DeliveredKeys::new(),
             running: true,
         })

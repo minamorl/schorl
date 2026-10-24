@@ -258,6 +258,8 @@ pub struct Surface {
     pub size: SurfaceSize,
     /// 貼るテクスチャ。
     pub texture: Texture,
+    /// surface-local cursor。`x/y` は UV、`radius_x/y` は各軸の半径。
+    cursor: Option<[f32; 4]>,
 }
 
 /// 一枚を描くために renderer が要る最小の組。
@@ -271,6 +273,8 @@ pub struct SurfaceDraw<'a> {
     pub texture: &'a Texture,
     /// ローカル平面 (±0.5) から参照空間への行列。
     pub model: Mat4,
+    /// shader に渡す cursor。負の半径は非表示。
+    pub cursor: [f32; 4],
 }
 
 impl Surface {
@@ -280,7 +284,13 @@ impl Surface {
             pose,
             size,
             texture,
+            cursor: None,
         }
+    }
+
+    /// window 上に cursor を重ねる。`None` なら非表示。
+    pub const fn set_cursor(&mut self, cursor: Option<[f32; 4]>) {
+        self.cursor = cursor;
     }
 
     /// このサーフェスの model 行列。
@@ -293,6 +303,7 @@ impl Surface {
         SurfaceDraw {
             texture: &self.texture,
             model: self.model(),
+            cursor: self.cursor.unwrap_or([-1.0, -1.0, -1.0, -1.0]),
         }
     }
 }

@@ -7,6 +7,7 @@
 
 layout(push_constant) uniform Push {
     mat4 mvp;
+    vec4 cursor;
 } push;
 
 layout(location = 0) out vec2 v_uv;
